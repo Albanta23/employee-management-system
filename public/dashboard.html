@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Sistema de Gestión de Trabajadores</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        body {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .sidebar {
+            background: var(--bg-sidebar);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            padding: var(--spacing-lg);
+            position: fixed;
+            height: 100vh;
+            width: 260px;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: var(--spacing-lg) 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .sidebar-logo {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary-light);
+        }
+
+        .sidebar-menu {
+            list-style: none;
+        }
+
+        .menu-item {
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .menu-link {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+            padding: 0.75rem var(--spacing-md);
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: var(--radius-md);
+            transition: all var(--transition-base);
+        }
+
+        .menu-link:hover,
+        .menu-link.active {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--primary-light);
+        }
+
+        .main-content {
+            margin-left: 260px;
+            padding: var(--spacing-xl);
+        }
+
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--spacing-xl);
+            padding-bottom: var(--spacing-lg);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span>👥</span>
+                <span>Gestión RH</span>
+            </div>
+        </div>
+
+        <ul class="sidebar-menu">
+            <li class="menu-item">
+                <a href="dashboard.html" class="menu-link active">
+                    📊 Dashboard
+                </a>
+            </li>
+            <li class="menu-item">
+                <a href="employees.html" class="menu-link">
+                    👤 Trabajadores
+                </a>
+            </li>
+            <li class="menu-item">
+                <a href="vacations.html" class="menu-link">
+                    🏖️ Vacaciones
+                </a>
+            </li>
+            <li class="menu-item">
+                <a href="absences.html" class="menu-link">
+                    🏥 Bajas Médicas
+                </a>
+            </li>
+        </ul>
+
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">
+                🚪 Cerrar Sesión
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="top-bar">
+            <div>
+                <h1 style="margin: 0;">Dashboard</h1>
+                <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Panel de control y estadísticas</p>
+            </div>
+            <div class="user-menu">
+                <div>
+                    <div style="font-weight: 600;" id="userName">Admin</div>
+                    <div style="font-size: 0.8125rem; color: var(--text-muted);">Administrador</div>
+                </div>
+                <div class="user-avatar" id="userAvatar">A</div>
+            </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-4" style="margin-bottom: var(--spacing-xl);">
+            <div class="stat-card fade-in">
+                <div class="stat-value" id="totalEmployees">-</div>
+                <div class="stat-label">Empleados Activos</div>
+            </div>
+            <div class="stat-card fade-in" style="animation-delay: 0.1s;">
+                <div class="stat-value" id="pendingVacations">-</div>
+                <div class="stat-label">Vacaciones Pendientes</div>
+            </div>
+            <div class="stat-card fade-in" style="animation-delay: 0.2s;">
+                <div class="stat-value" id="activeAbsences">-</div>
+                <div class="stat-label">Bajas Activas</div>
+            </div>
+            <div class="stat-card fade-in" style="animation-delay: 0.3s;">
+                <div class="stat-value" id="totalLocations">-</div>
+                <div class="stat-label">Ubicaciones</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-2" style="margin-bottom: var(--spacing-xl);">
+            <div class="card fade-in">
+                <div class="card-header">
+                    <h3 class="card-title">Empleados por Ubicación</h3>
+                </div>
+                <div class="chart-container">
+                    <canvas id="locationChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card fade-in">
+                <div class="card-header">
+                    <h3 class="card-title">Top 10 Puestos</h3>
+                </div>
+                <div class="chart-container">
+                    <canvas id="positionChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="card fade-in">
+            <div class="card-header">
+                <h3 class="card-title">Acciones Rápidas</h3>
+            </div>
+            <div style="display: flex; gap: var(--spacing-md); flex-wrap: wrap;">
+                <a href="employee-form.html" class="btn btn-primary">
+                    ➕ Nuevo Empleado
+                </a>
+                <a href="vacations.html" class="btn btn-secondary">
+                    📅 Gestionar Vacaciones
+                </a>
+                <a href="absences.html" class="btn btn-secondary">
+                    🏥 Registrar Baja
+                </a>
+                <a href="employees.html" class="btn btn-secondary">
+                    👥 Ver Todos los Empleados
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="js/api.js"></script>
+    <script>
+        // Verificar autenticación
+        if (!isAuthenticated()) {
+            window.location.href = 'index.html';
+        }
+
+        // Cargar datos del usuario
+        const user = getUser();
+        if (user) {
+            document.getElementById('userName').textContent = user.name;
+            document.getElementById('userAvatar').textContent = user.name.charAt(0).toUpperCase();
+        }
+
+        // Cargar estadísticas
+        async function loadStats() {
+            try {
+                const stats = await employeesAPI.getStats();
+                
+                if (stats) {
+                    document.getElementById('totalEmployees').textContent = stats.totalActive || 0;
+                    document.getElementById('pendingVacations').textContent = stats.vacationsPending || 0;
+                    document.getElementById('activeAbsences').textContent = stats.activeAbsences || 0;
+                    document.getElementById('totalLocations').textContent = stats.byLocation?.length || 0;
+
+                    // Crear gráficos
+                    createLocationChart(stats.byLocation || []);
+                    createPositionChart(stats.byPosition || []);
+                }
+            } catch (error) {
+                console.error('Error al cargar estadísticas:', error);
+                showAlert('Error al cargar las estadísticas', 'error');
+            }
+        }
+
+        // Gráfico de ubicaciones
+        function createLocationChart(data) {
+            const ctx = document.getElementById('locationChart');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.map(item => item.location),
+                    datasets: [{
+                        data: data.map(item => item.count),
+                        backgroundColor: [
+                            'rgba(99, 102, 241, 0.8)',
+                            'rgba(139, 92, 246, 0.8)',
+                            'rgba(236, 72, 153, 0.8)',
+                            'rgba(16, 185, 129, 0.8)',
+                            'rgba(245, 158, 11, 0.8)',
+                            'rgba(59, 130, 246, 0.8)',
+                        ],
+                        borderColor: 'rgba(15, 23, 42, 0.8)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#cbd5e1',
+                                padding: 15,
+                                font: { size: 12 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Gráfico de puestos
+        function createPositionChart(data) {
+            const ctx = document.getElementById('positionChart');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(item => item.position),
+                    datasets: [{
+                        label: 'Empleados',
+                        data: data.map(item => item.count),
+                        backgroundColor: 'rgba(99, 102, 241, 0.8)',
+                        borderColor: 'rgba(99, 102, 241, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#cbd5e1',
+                                stepSize: 1
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: '#cbd5e1',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Cargar datos al iniciar
+        loadStats();
+    </script>
+</body>
+</html>

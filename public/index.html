@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - Sistema de Gestión de Trabajadores</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/styles.css" />
+    <style>
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: linear-gradient(
+          135deg,
+          #0f172a 0%,
+          #1e293b 50%,
+          #0f172a 100%
+        );
+        position: relative;
+        overflow: hidden;
+      }
+
+      /* Efecto de partículas de fondo */
+      body::before {
+        content: "";
+        position: absolute;
+        width: 400px;
+        height: 400px;
+        background: radial-gradient(
+          circle,
+          rgba(99, 102, 241, 0.1) 0%,
+          transparent 70%
+        );
+        top: -200px;
+        right: -200px;
+        animation: float 6s ease-in-out infinite;
+      }
+
+      body::after {
+        content: "";
+        position: absolute;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(
+          circle,
+          rgba(139, 92, 246, 0.1) 0%,
+          transparent 70%
+        );
+        bottom: -150px;
+        left: -150px;
+        animation: float 8s ease-in-out infinite reverse;
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-20px) rotate(5deg);
+        }
+      }
+
+      .login-container {
+        position: relative;
+        z-index: 10;
+        width: 100%;
+        max-width: 420px;
+        padding: var(--spacing-xl);
+      }
+
+      .login-card {
+        background: rgba(30, 41, 59, 0.8);
+        backdrop-filter: blur(20px);
+        border-radius: var(--radius-xl);
+        padding: 3rem 2.5rem;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(255, 255, 255, 0.05);
+        animation: slideIn 0.5s ease-out;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(30px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .login-header {
+        text-align: center;
+        margin-bottom: 2.5rem;
+      }
+
+      .logo {
+        width: 60px;
+        height: 60px;
+        margin: 0 auto 1rem;
+        background: linear-gradient(
+          135deg,
+          var(--primary) 0%,
+          var(--secondary) 100%
+        );
+        border-radius: var(--radius-lg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        box-shadow: var(--shadow-glow);
+      }
+
+      .login-title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        background: linear-gradient(
+          135deg,
+          var(--primary-light) 0%,
+          var(--accent) 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .login-subtitle {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+      }
+
+      .form-group {
+        margin-bottom: 1.5rem;
+      }
+
+      .form-control {
+        height: 48px;
+      }
+
+      .btn-login {
+        width: 100%;
+        height: 48px;
+        font-size: 1rem;
+        font-weight: 600;
+        margin-top: var(--spacing-md);
+      }
+
+      .login-footer {
+        margin-top: 2rem;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.8125rem;
+      }
+
+      .credentials-hint {
+        background: rgba(99, 102, 241, 0.05);
+        border: 1px solid rgba(99, 102, 241, 0.1);
+        border-radius: var(--radius-md);
+        padding: var(--spacing-md);
+        margin-top: 1.5rem;
+        font-size: 0.8125rem;
+        text-align: center;
+      }
+
+      .credentials-hint strong {
+        color: var(--primary-light);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-container">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="logo">👥</div>
+          <h1 class="login-title">Bienvenido</h1>
+          <p class="login-subtitle">Sistema de Gestión de Trabajadores</p>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <form id="loginForm">
+          <div class="form-group">
+            <label class="form-label" for="username">Usuario</label>
+            <input
+              type="text"
+              id="username"
+              class="form-control"
+              placeholder="Ingrese su usuario"
+              required
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="password">Contraseña</label>
+            <input
+              type="password"
+              id="password"
+              class="form-control"
+              placeholder="Ingrese su contraseña"
+              required
+              autocomplete="current-password"
+            />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-login">
+            Iniciar Sesión
+          </button>
+        </form>
+
+        <div class="credentials-hint">
+          <strong>Credenciales por defecto:</strong><br />
+          Usuario: <strong>admin</strong> | Contraseña:
+          <strong>admin123</strong>
+        </div>
+
+        <div class="login-footer">
+          © 2024 Sistema de Gestión de Trabajadores
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "http://localhost:3000/api";
+
+      document
+        .getElementById("loginForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const username = document.getElementById("username").value;
+          const password = document.getElementById("password").value;
+          const alertContainer = document.getElementById("alert-container");
+
+          try {
+            const response = await fetch(`${API_URL}/auth/login`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ username, password }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              // Guardar token y usuario
+              localStorage.setItem("token", data.token);
+              localStorage.setItem("user", JSON.stringify(data.user));
+
+              // Mostrar éxito
+              alertContainer.innerHTML = `
+                        <div class="alert alert-success fade-in">
+                            ✓ Inicio de sesión exitoso. Redirigiendo...
+                        </div>
+                    `;
+
+              // Redirigir al dashboard
+              setTimeout(() => {
+                window.location.href = "dashboard.html";
+              }, 1000);
+            } else {
+              alertContainer.innerHTML = `
+                        <div class="alert alert-error fade-in">
+                            ✗ ${data.error || "Error al iniciar sesión"}
+                        </div>
+                    `;
+            }
+          } catch (error) {
+            alertContainer.innerHTML = `
+                    <div class="alert alert-error fade-in">
+                        ✗ Error de conexión. Por favor, verifica que el servidor esté en ejecución.
+                    </div>
+                `;
+            console.error("Error:", error);
+          }
+        });
+
+      // Auto-rellenar credenciales si el usuario hace clic en el hint
+      document
+        .querySelector(".credentials-hint")
+        .addEventListener("click", () => {
+          document.getElementById("username").value = "admin";
+          document.getElementById("password").value = "admin123";
+        });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trabajadores - Sistema de Gestión</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        body { display: grid; grid-template-columns: 260px 1fr; margin: 0; }
+        .sidebar { background: var(--bg-sidebar); border-right: 1px solid rgba(255, 255, 255, 0.05); padding: var(--spacing-lg); position: fixed; height: 100vh; width: 260px; }
+        .main-content { margin-left: 260px; padding: var(--spacing-xl); }
+        .search-bar { display: flex; gap: var(--spacing-md); margin-bottom: var(--spacing-lg); flex-wrap: wrap; }
+        .search-bar input, .search-bar select { flex: 1; min-width: 200px; }
+        .action-buttons { display: flex; gap: var(--spacing-sm); }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div style="padding: var(--spacing-lg) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: var(--spacing-lg);">
+            <div style="display: flex; align-items: center; gap: var(--spacing-md); font-size: 1.25rem; font-weight: 700; color: var(--primary-light);">
+                <span>👥</span><span>Gestión RH</span>
+            </div>
+        </div>
+        <ul style="list-style: none;">
+            <li style="margin-bottom: var(--spacing-sm);"><a href="dashboard.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">📊 Dashboard</a></li>
+            <li style="margin-bottom: var(--spacing-sm);"><a href="employees.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--primary-light); background: rgba(99, 102, 241, 0.1); text-decoration: none; border-radius: var(--radius-md);">👤 Trabajadores</a></li>
+            <li style="margin-bottom: var(--spacing-sm);"><a href="vacations.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">🏖️ Vacaciones</a></li>
+            <li style="margin-bottom: var(--spacing-sm);"><a href="absences.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">🏥 Bajas Médicas</a></li>
+        </ul>
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);"><button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button></div>
+    </aside>
+
+    <main class="main-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xl); padding-bottom: var(--spacing-lg); border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+            <div><h1 style="margin: 0;">Trabajadores</h1><p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Gestión completa de empleados</p></div>
+            <a href="employee-form.html" class="btn btn-primary">➕ Nuevo Empleado</a>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div class="card">
+            <div class="search-bar">
+                <input type="text" id="searchInput" class="form-control" placeholder="🔍 Buscar por nombre, DNI, email o teléfono...">
+                <select id="locationFilter" class="form-select"><option value="">Todas las ubicaciones</option></select>
+                <select id="statusFilter" class="form-select">
+                    <option value="active">Activos</option>
+                    <option value="inactive">Inactivos</option>
+                    <option value="on_leave">De baja</option>
+                </select>
+                <button onclick="loadEmployees()" class="btn btn-primary">Buscar</button>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>DNI</th>
+                            <th>Teléfono</th>
+                            <th>Email</th>
+                            <th>Puesto</th>
+                            <th>Ubicación</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employeesTable">
+                        <tr><td colspan="8" style="text-align: center; padding: 2rem;">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="pagination" style="margin-top: var(--spacing-lg); text-align: center;"></div>
+        </div>
+    </main>
+
+    <script src="js/api.js"></script>
+    <script>
+        if (!isAuthenticated()) window.location.href = 'index.html';
+
+        let currentPage = 1;
+
+        async function loadEmployees() {
+            const search = document.getElementById('searchInput').value;
+            const location = document.getElementById('locationFilter').value;
+            const status = document.getElementById('statusFilter').value;
+
+            const params = { page: currentPage, limit: 20, search, location, status };
+            const data = await employeesAPI.getAll(params);
+
+            if (data) {
+                renderEmployees(data.employees);
+                renderPagination(data.pagination);
+            }
+        }
+
+        function renderEmployees(employees) {
+            const tbody = document.getElementById('employeesTable');
+            if (employees.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">No se encontraron trabajadores</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = employees.map(emp => `
+                <tr>
+                    <td><strong>${emp.full_name}</strong></td>
+                    <td>${emp.dni}</td>
+                    <td>${formatPhone(emp.phone)}</td>
+                    <td>${emp.email || '-'}</td>
+                    <td>${emp.position}</td>
+                    <td>${emp.location}</td>
+                    <td>
+                        <span class="badge badge-${emp.status === 'active' ? 'success' : emp.status === 'inactive' ? 'error' : 'warning'}">
+                            ${emp.status === 'active' ? 'Activo' : emp.status === 'inactive' ? 'Inactivo' : 'De baja'}
+                        </span>
+                    </td>
+                    <td class="action-buttons">
+                        <a href="employee-form.html?id=${emp.id}" class="btn btn-sm btn-secondary">✏️ Editar</a>
+                        <button onclick="deleteEmployee(${emp.id}, '${emp.full_name}')" class="btn btn-sm btn-danger">🗑️</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderPagination(pagination) {
+            const div = document.getElementById('pagination');
+            if (pagination.pages <= 1) {
+                div.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            for (let i = 1; i <= pagination.pages; i++) {
+                html += `<button onclick="goToPage(${i})" class="btn btn-sm ${i === pagination.page ? 'btn-primary' : 'btn-secondary'}" style="margin: 0 0.25rem;">${i}</button>`;
+            }
+            div.innerHTML = html;
+        }
+
+        function goToPage(page) {
+            currentPage = page;
+            loadEmployees();
+        }
+
+        async function deleteEmployee(id, name) {
+            if (!confirm(`¿Estás seguro de que quieres dar de baja a ${name}?`)) return;
+
+            const result = await employeesAPI.delete(id);
+            if (result) {
+                showAlert('Trabajador dado de baja correctamente', 'success');
+                loadEmployees();
+            } else {
+                showAlert('Error al dar de baja al trabajador', 'error');
+            }
+        }
+
+        async function loadLocations() {
+            const stats = await employeesAPI.getStats();
+            if (stats && stats.byLocation) {
+                const select = document.getElementById('locationFilter');
+                stats.byLocation.forEach(loc => {
+                    const option = document.createElement('option');
+                    option.value = loc.location;
+                    option.textContent = loc.location;
+                    select.appendChild(option);
+                });
+            }
+        }
+
+        document.getElementById('searchInput').addEventListener('keyup', (e) => {
+            if (e.key === 'Enter') loadEmployees();
+        });
+
+        loadLocations();
+        loadEmployees();
+    </script>
+</body>
+</html>
