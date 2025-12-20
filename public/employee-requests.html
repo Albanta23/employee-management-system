@@ -79,12 +79,17 @@
             <div class="grid grid-cols-2">
                 <div class="form-group">
                     <label class="form-label">Fecha Inicio</label>
-                    <input type="date" id="start_date" class="form-control" required>
+                    <input type="date" id="start_date" class="form-control" required onchange="updateCalculatedDays()">
                 </div>
                 <div class="form-group" id="end-date-group">
                     <label class="form-label">Fecha Fin (Opcional)</label>
-                    <input type="date" id="end_date" class="form-control">
+                    <input type="date" id="end_date" class="form-control" onchange="updateCalculatedDays()">
                 </div>
+            </div>
+
+            <div id="days-preview"
+                style="display: none; margin-bottom: 1.5rem; padding: 0.75rem; background: rgba(99, 102, 241, 0.1); border-radius: var(--radius-md); text-align: center; color: var(--primary-light); font-weight: 600;">
+                Días a descontar: <span id="calculated-days">0</span>
             </div>
 
             <div class="form-group" id="subtype-group" style="display: none;">
@@ -159,14 +164,42 @@
 
         setType(currentCategory, null);
 
+        async function updateCalculatedDays() {
+            if (currentCategory !== 'vacation') {
+                document.getElementById('days-preview').style.display = 'none';
+                return;
+            }
+
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value || startDate;
+
+            if (startDate) {
+                const res = await holidaysAPI.calculate({
+                    start_date: startDate,
+                    end_date: endDate,
+                    location: user.location || ''
+                });
+
+                if (res && typeof res.days === 'number') {
+                    document.getElementById('days-preview').style.display = 'block';
+                    document.getElementById('calculated-days').textContent = res.days;
+                }
+            }
+        }
+
         document.getElementById('requestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const startDate = document.getElementById('start_date').value;
             const endDate = document.getElementById('end_date').value || startDate;
 
-            // Calcular días (aproximado)
-            const days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1;
+            // Obtener los días calculados (en el caso de vacaciones, el sistema lo hace auto)
+            let days = parseInt(document.getElementById('calculated-days').textContent) || 0;
+
+            // Si es otro tipo de ausencia (permiso/baja), calculamos naturales por defecto
+            if (currentCategory !== 'vacation') {
+                days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1;
+            }
 
             const data = {
                 employee_id: user.employee_id,

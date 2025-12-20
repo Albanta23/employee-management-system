@@ -1,4 +1,6 @@
-const API_URL = 'http://localhost:3000/api';
+const API_URL = window.location.origin.includes('localhost')
+    ? 'http://localhost:3000/api'
+    : '/api';
 
 // Obtener token del localStorage
 function getToken() {
@@ -116,6 +118,19 @@ const absencesAPI = {
         body: JSON.stringify(data)
     }),
     delete: (id) => callAPI(`${API_URL}/absences/${id}`, { method: 'DELETE' })
+};
+
+const holidaysAPI = {
+    getAll: () => callAPI(`${API_URL}/holidays`),
+    create: (data) => callAPI(`${API_URL}/holidays`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    delete: (id) => callAPI(`${API_URL}/holidays/${id}`, { method: 'DELETE' }),
+    calculate: (params) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/holidays/calculate?${query}`);
+    }
 };
 
 // Control Horario API

@@ -148,17 +148,22 @@
             const emojis = { in: '🟢', out: '🔴', break_start: '🟠', break_end: '🔵' };
             const labels = { in: 'Entrada', out: 'Salida', break_start: 'Descanso (Inicio)', break_end: 'Descanso (Fin)' };
 
-            tbody.innerHTML = logs.map(log => `
+            tbody.innerHTML = logs.map(log => {
+                const geoInfo = log.latitude ?
+                    `<a href="https://www.google.com/maps?q=${log.latitude},${log.longitude}" target="_blank" class="btn btn-sm btn-secondary" style="font-size: 0.7rem; padding: 2px 5px;">📍 Mapa</a>` :
+                    '';
+
+                return `
                 <tr>
                     <td><strong>${log.full_name}</strong></td>
                     <td>${log.dni}</td>
-                    <td>${log.location}</td>
+                    <td>${log.location} <br> ${geoInfo}</td>
                     <td>${formatDate(log.timestamp)}</td>
                     <td style="font-family: monospace; font-weight: 600;">${new Date(log.timestamp).toLocaleTimeString('es-ES', { hour12: false })}</td>
                     <td><span class="badge badge-${log.type === 'in' ? 'success' : log.type === 'out' ? 'danger' : 'warning'}">${emojis[log.type]} ${labels[log.type]}</span></td>
                     <td style="font-size: 0.75rem; color: var(--text-muted);">${log.device_info || '-'} <br> ${log.ip_address || ''}</td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function exportAttendancePDF() {

@@ -48,21 +48,29 @@ router.get('/', async (req, res) => {
     }
 });
 
+const { calculateVacationDays } = require('../utils/dateUtils');
+
 // Crear solicitud de vacaciones
 router.post('/', async (req, res) => {
     try {
-        const { employee_id, start_date, end_date, days, type, reason } = req.body;
+        const { employee_id, start_date, end_date, type, reason } = req.body;
 
-        if (!employee_id || !start_date || !end_date || !days) {
+        if (!employee_id || !start_date || !end_date) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
         }
+
+        const employee = await Employee.findById(employee_id);
+        if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+        // Cálculo automático de días reales (naturales menos festivos/findes según convenio)
+        const days = await calculateVacationDays(new Date(start_date), new Date(end_date), employee.location);
 
         const vacation = new Vacation({
             employee_id, start_date, end_date, days, type, reason, status: 'pending'
         });
 
         await vacation.save();
-        res.status(201).json({ id: vacation._id, message: 'Solicitud creada correctamente' });
+        res.status(201).json({ id: vacation._id, days, message: 'Solicitud creada correctamente' });
 
     } catch (error) {
         console.error('Error al crear solicitud:', error);

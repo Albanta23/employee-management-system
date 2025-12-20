@@ -103,16 +103,18 @@
                 <div class="grid grid-cols-2">
                     <div class="form-group">
                         <label class="form-label">Fecha Inicio *</label>
-                        <input type="date" id="start_date" class="form-control" required>
+                        <input type="date" id="start_date" class="form-control" required
+                            onchange="updateCalculatedDays()">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Fecha Fin *</label>
-                        <input type="date" id="end_date" class="form-control" required>
+                        <input type="date" id="end_date" class="form-control" required
+                            onchange="updateCalculatedDays()">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Días *</label>
-                    <input type="number" id="days" class="form-control" required>
+                    <label class="form-label">Días a Descontar * (Cálculo automático)</label>
+                    <input type="number" id="days" class="form-control" required readonly>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Motivo</label>
@@ -257,6 +259,25 @@
         document.getElementById('vacationModal').addEventListener('click', (e) => {
             if (e.target.id === 'vacationModal') closeModal();
         });
+
+        async function updateCalculatedDays() {
+            const employeeId = document.getElementById('employee_id').value;
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value;
+
+            if (employeeId && startDate && endDate) {
+                const employee = await employeesAPI.getById(employeeId);
+                const res = await holidaysAPI.calculate({
+                    start_date: startDate,
+                    end_date: endDate,
+                    location: employee ? employee.location : ''
+                });
+
+                if (res) {
+                    document.getElementById('days').value = res.days;
+                }
+            }
+        }
 
         loadVacations();
     </script>

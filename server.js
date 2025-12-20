@@ -9,6 +9,7 @@ const employeesRoutes = require('./src/routes/employees.routes');
 const vacationsRoutes = require('./src/routes/vacations.routes');
 const absencesRoutes = require('./src/routes/absences.routes');
 const attendanceRoutes = require('./src/routes/attendance.routes');
+const holidaysRoutes = require('./src/routes/holidays.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +25,7 @@ app.use('/api/employees', employeesRoutes);
 app.use('/api/vacations', vacationsRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/holidays', holidaysRoutes);
 
 // Ruta raíz - redirigir al login
 app.get('/', (req, res) => {
