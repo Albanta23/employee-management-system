@@ -45,3 +45,6 @@ temp/
 
 # Excel temporal
 ~$*.xlsx
+
+# Deployment guides with secrets
+DEPLOY_GUIDE_COOLIFY.md
