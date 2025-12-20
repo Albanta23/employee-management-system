@@ -27,7 +27,7 @@ Ve a la pestaña **"Environment Variables"** en Coolify y añade las siguientes:
 | :--- | :--- |
 | `NODE_ENV` | `production` |
 | `PORT` | `3000` |
-| `MONGODB_URI` | `mongodb+srv://dbjavier:Albanta2025@cluster0.e16j9g4.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0` |
+| `MONGODB_URI` | `mongodb+srv://` |
 | `JWT_SECRET` | `tu_clave_secreta_aqui` (puedes usar una aleatoria larga) |
 
 ### Paso 4: Dominios
@@ -44,4 +44,4 @@ Como el sistema usa **Node.js + Express**, Coolify levantará el contenedor y el
 Haz clic en **"Deploy"** y espera a que Coolify termine de construir la imagen e iniciar el contenedor. Una vez finalizado, el estado cambiará a `Running`.
 
 ---
-*Documentación generada para el sistema de gestión RH - 20/12/2024*
+*Documentación generada para el sistema de gestión RH - 20/12/2025*
