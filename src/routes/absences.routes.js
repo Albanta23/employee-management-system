@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
         const { employee_id, status, type } = req.query;
 
         let query = `
-            SELECT a.*, e.full_name, e.position, e.location 
+            SELECT a.*, e.full_name, e.dni, e.position, e.location 
             FROM absences a
             JOIN employees e ON a.employee_id = e.id
             WHERE 1=1

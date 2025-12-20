@@ -1,106 +1,14 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Sistema de Gestión de Trabajadores</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
-    <style>
-        body {
-            display: grid;
-            grid-template-columns: 260px 1fr;
-            min-height: 100vh;
-            margin: 0;
-        }
-
-        .sidebar {
-            background: var(--bg-sidebar);
-            border-right: 1px solid rgba(255, 255, 255, 0.05);
-            padding: var(--spacing-lg);
-            position: fixed;
-            height: 100vh;
-            width: 260px;
-            overflow-y: auto;
-        }
-
-        .sidebar-header {
-            padding: var(--spacing-lg) 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            margin-bottom: var(--spacing-lg);
-        }
-
-        .sidebar-logo {
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-md);
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--primary-light);
-        }
-
-        .sidebar-menu {
-            list-style: none;
-        }
-
-        .menu-item {
-            margin-bottom: var(--spacing-sm);
-        }
-
-        .menu-link {
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-md);
-            padding: 0.75rem var(--spacing-md);
-            color: var(--text-secondary);
-            text-decoration: none;
-            border-radius: var(--radius-md);
-            transition: all var(--transition-base);
-        }
-
-        .menu-link:hover,
-        .menu-link.active {
-            background: rgba(99, 102, 241, 0.1);
-            color: var(--primary-light);
-        }
-
-        .main-content {
-            margin-left: 260px;
-            padding: var(--spacing-xl);
-        }
-
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: var(--spacing-xl);
-            padding-bottom: var(--spacing-lg);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .user-menu {
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-md);
-        }
-
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-        }
-
-        .chart-container {
-            position: relative;
-            height: 300px;
-        }
-    </style>
 </head>
+
 <body>
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -112,25 +20,11 @@
         </div>
 
         <ul class="sidebar-menu">
-            <li class="menu-item">
-                <a href="dashboard.html" class="menu-link active">
-                    📊 Dashboard
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="employees.html" class="menu-link">
-                    👤 Trabajadores
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="vacations.html" class="menu-link">
-                    🏖️ Vacaciones
-                </a>
-            </li>
-            <li class="menu-item">
-                <a href="absences.html" class="menu-link">
-                    🏥 Bajas Médicas
-                </a>
+            <li class="menu-item"><a href="dashboard.html" class="menu-link active"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a>
             </li>
         </ul>
 
@@ -205,18 +99,21 @@
             <div class="card-header">
                 <h3 class="card-title">Acciones Rápidas</h3>
             </div>
-            <div style="display: flex; gap: var(--spacing-md); flex-wrap: wrap;">
+            <div class="actions-grid">
                 <a href="employee-form.html" class="btn btn-primary">
-                    ➕ Nuevo Empleado
+                    <span>➕</span> Nuevo Empleado
                 </a>
                 <a href="vacations.html" class="btn btn-secondary">
-                    📅 Gestionar Vacaciones
+                    <span>📅</span> Gestionar Vacaciones
                 </a>
                 <a href="absences.html" class="btn btn-secondary">
-                    🏥 Registrar Baja
+                    <span>🏥</span> Registrar Baja
+                </a>
+                <a href="permissions.html" class="btn btn-secondary">
+                    <span>📄</span> Gestionar Permisos
                 </a>
                 <a href="employees.html" class="btn btn-secondary">
-                    👥 Ver Todos los Empleados
+                    <span>👥</span> Ver Todos los Empleados
                 </a>
             </div>
         </div>
@@ -241,7 +138,7 @@
         async function loadStats() {
             try {
                 const stats = await employeesAPI.getStats();
-                
+
                 if (stats) {
                     document.getElementById('totalEmployees').textContent = stats.totalActive || 0;
                     document.getElementById('pendingVacations').textContent = stats.vacationsPending || 0;
@@ -349,4 +246,5 @@
         loadStats();
     </script>
 </body>
+
 </html>

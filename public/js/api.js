@@ -45,11 +45,11 @@ const employeesAPI = {
     getAll: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         const url = `${API_URL}/employees${queryString ? '?' + queryString : ''}`;
-        
+
         const response = await fetch(url, {
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -58,7 +58,7 @@ const employeesAPI = {
         const response = await fetch(`${API_URL}/employees/stats`, {
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -67,7 +67,7 @@ const employeesAPI = {
         const response = await fetch(`${API_URL}/employees/${id}`, {
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -78,7 +78,7 @@ const employeesAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -89,7 +89,7 @@ const employeesAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -99,7 +99,7 @@ const employeesAPI = {
             method: 'DELETE',
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     }
@@ -110,11 +110,11 @@ const vacationsAPI = {
     getAll: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         const url = `${API_URL}/vacations${queryString ? '?' + queryString : ''}`;
-        
+
         const response = await fetch(url, {
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -122,11 +122,20 @@ const vacationsAPI = {
     getCalendar: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         const url = `${API_URL}/vacations/calendar${queryString ? '?' + queryString : ''}`;
-        
+
         const response = await fetch(url, {
             headers: getAuthHeaders()
         });
-        
+
+        if (handleAuthError(response)) return null;
+        return await response.json();
+    },
+
+    getById: async (id) => {
+        const response = await fetch(`${API_URL}/vacations/${id}`, {
+            headers: getAuthHeaders()
+        });
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -137,7 +146,7 @@ const vacationsAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -148,7 +157,7 @@ const vacationsAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -158,7 +167,7 @@ const vacationsAPI = {
             method: 'DELETE',
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     }
@@ -169,11 +178,11 @@ const absencesAPI = {
     getAll: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         const url = `${API_URL}/absences${queryString ? '?' + queryString : ''}`;
-        
+
         const response = await fetch(url, {
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -184,7 +193,7 @@ const absencesAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -195,7 +204,7 @@ const absencesAPI = {
             headers: getAuthHeaders(),
             body: JSON.stringify(data)
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     },
@@ -205,7 +214,7 @@ const absencesAPI = {
             method: 'DELETE',
             headers: getAuthHeaders()
         });
-        
+
         if (handleAuthError(response)) return null;
         return await response.json();
     }
@@ -216,11 +225,11 @@ function showAlert(message, type = 'info') {
     const alert = document.createElement('div');
     alert.className = `alert alert-${type} fade-in`;
     alert.textContent = message;
-    
+
     const container = document.getElementById('alert-container') || document.querySelector('.container');
     if (container) {
         container.insertBefore(alert, container.firstChild);
-        
+
         setTimeout(() => {
             alert.style.opacity = '0';
             setTimeout(() => alert.remove(), 300);
@@ -231,10 +240,10 @@ function showAlert(message, type = 'info') {
 function formatDate(dateString) {
     if (!dateString) return '-';
     const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit' 
+    return date.toLocaleDateString('es-ES', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
     });
 }
 

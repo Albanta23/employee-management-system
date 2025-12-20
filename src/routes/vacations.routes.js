@@ -8,10 +8,10 @@ router.use(authenticateToken);
 // Obtener todas las vacaciones con filtros
 router.get('/', async (req, res) => {
     try {
-        const { employee_id, status, year } = req.query;
+        const { employee_id, status, year, type } = req.query;
 
         let query = `
-            SELECT v.*, e.full_name, e.position, e.location 
+            SELECT v.*, e.full_name, e.dni, e.position, e.location 
             FROM vacations v
             JOIN employees e ON v.employee_id = e.id
             WHERE 1=1
@@ -33,6 +33,11 @@ router.get('/', async (req, res) => {
             params.push(year);
         }
 
+        if (type) {
+            query += ' AND v.type = ?';
+            params.push(type);
+        }
+
         query += ' ORDER BY v.start_date DESC';
 
         const vacations = await dbAll(query, params);
@@ -50,7 +55,7 @@ router.get('/calendar', async (req, res) => {
         const { year = new Date().getFullYear(), month } = req.query;
 
         let query = `
-            SELECT v.*, e.full_name, e.position, e.location 
+            SELECT v.*, e.full_name, e.dni, e.position, e.location 
             FROM vacations v
             JOIN employees e ON v.employee_id = e.id
             WHERE v.status = 'approved' AND strftime("%Y", v.start_date) = ?
@@ -70,6 +75,29 @@ router.get('/calendar', async (req, res) => {
     } catch (error) {
         console.error('Error al obtener calendario:', error);
         res.status(500).json({ error: 'Error al obtener calendario' });
+    }
+});
+
+// Obtener una solicitud por ID
+router.get('/:id', async (req, res) => {
+    try {
+        const vacation = await dbGet(
+            `SELECT v.*, e.full_name, e.dni, e.position, e.location 
+             FROM vacations v
+             JOIN employees e ON v.employee_id = e.id
+             WHERE v.id = ?`,
+            [req.params.id]
+        );
+
+        if (!vacation) {
+            return res.status(404).json({ error: 'Solicitud no encontrada' });
+        }
+
+        res.json(vacation);
+
+    } catch (error) {
+        console.error('Error al obtener solicitud:', error);
+        res.status(500).json({ error: 'Error al obtener solicitud' });
     }
 });
 
@@ -96,20 +124,41 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Actualizar estado de vacaciones (aprobar/rechazar)
+// Actualizar solicitud (estado o datos completos)
 router.put('/:id', async (req, res) => {
     try {
-        const { status, reason } = req.body;
+        const { status, reason, start_date, end_date, days, type } = req.body;
 
-        if (!['pending', 'approved', 'rejected'].includes(status)) {
-            return res.status(400).json({ error: 'Estado inválido' });
+        // Si solo se envía el status, es una aprobación/rechazo
+        if (status && !start_date) {
+            if (!['pending', 'approved', 'rejected'].includes(status)) {
+                return res.status(400).json({ error: 'Estado inválido' });
+            }
+
+            const result = await dbRun(
+                `UPDATE vacations 
+                 SET status = ?, reason = ?, approved_by = ?, approved_date = CURRENT_TIMESTAMP 
+                 WHERE id = ?`,
+                [status, reason || null, req.user.id, req.params.id]
+            );
+
+            if (result.changes === 0) {
+                return res.status(404).json({ error: 'Solicitud no encontrada' });
+            }
+
+            return res.json({ message: 'Estado actualizado correctamente' });
+        }
+
+        // Si se envían más datos, es una edición completa
+        if (!start_date || !end_date || !days) {
+            return res.status(400).json({ error: 'Faltan campos requeridos para la edición' });
         }
 
         const result = await dbRun(
             `UPDATE vacations 
-             SET status = ?, reason = ?, approved_by = ?, approved_date = CURRENT_TIMESTAMP 
+             SET start_date = ?, end_date = ?, days = ?, type = ?, reason = ? 
              WHERE id = ?`,
-            [status, reason || null, req.user.id, req.params.id]
+            [start_date, end_date, days, type || 'vacation', reason || null, req.params.id]
         );
 
         if (result.changes === 0) {

@@ -1,35 +1,53 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bajas Médicas - Sistema de Gestión</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
-    <style>
-        body { display: grid; grid-template-columns: 260px 1fr; margin: 0; }
-        .sidebar { background: var(--bg-sidebar); border-right: 1px solid rgba(255, 255, 255, 0.05); padding: var(--spacing-lg); position: fixed; height: 100vh; width: 260px; }
-        .main-content { margin-left: 260px; padding: var(--spacing-xl); }
-    </style>
 </head>
+
 <body>
     <aside class="sidebar">
-        <div style="padding: var(--spacing-lg) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: var(--spacing-lg);">
-            <div style="display: flex; align-items: center; gap: var(--spacing-md); font-size: 1.25rem; font-weight: 700; color: var(--primary-light);"><span>👥</span><span>Gestión RH</span></div>
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span>👥</span><span>Gestión RH</span>
+            </div>
         </div>
-        <ul style="list-style: none;">
-            <li style="margin-bottom: var(--spacing-sm);"><a href="dashboard.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">📊 Dashboard</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a href="employees.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">👤 Trabajadores</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a href="vacations.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">🏖️ Vacaciones</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a href="absences.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--primary-light); background: rgba(99, 102, 241, 0.1); text-decoration: none; border-radius: var(--radius-md);">🏥 Bajas Médicas</a></li>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link active"><span>🏥</span> Bajas Médicas</a>
+            </li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a>
+            </li>
         </ul>
-        <div style="margin-top: auto; padding-top: var(--spacing-xl);"><button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button></div>
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button>
+        </div>
     </aside>
 
     <main class="main-content">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xl);">
-            <div><h1 style="margin: 0;">Gestión de Bajas Médicas</h1></div>
-            <button onclick="showNewAbsenceModal()" class="btn btn-primary">➕ Registrar Baja</button>
+        <div class="card fade-in" style="margin-bottom: var(--spacing-xl);">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);">
+                <div>
+                    <h1 style="margin: 0;">Gestión de Bajas Médicas</h1>
+                    <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Seguimiento y registro de incidencias
+                        médicas</p>
+                </div>
+                <div class="actions-grid" style="padding-top: 0;">
+                    <button onclick="exportAbsences()" class="btn btn-secondary">
+                        <span>📤</span> Exportar PDF
+                    </button>
+                    <button onclick="showNewAbsenceModal()" class="btn btn-primary">
+                        <span>➕</span> Registrar Nueva Baja
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div id="alert-container"></div>
@@ -60,7 +78,9 @@
                         </tr>
                     </thead>
                     <tbody id="absencesTable">
-                        <tr><td colspan="7" style="text-align: center; padding: 2rem;">Cargando...</td></tr>
+                        <tr>
+                            <td colspan="7" style="text-align: center; padding: 2rem;">Cargando...</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -69,6 +89,7 @@
 
     <div id="absenceModal" class="modal">
         <div class="modal-content">
+            <button class="btn-close" onclick="closeModal()" title="Cerrar">×</button>
             <h2>Registrar Baja Médica</h2>
             <form id="absenceForm">
                 <div class="form-group">
@@ -114,14 +135,44 @@
     </div>
 
     <script src="js/api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="js/reports.js"></script>
     <script>
         if (!isAuthenticated()) window.location.href = 'index.html';
+
+        let currentAbsences = [];
 
         async function loadAbsences() {
             const absences = await absencesAPI.getAll();
             if (absences) {
+                currentAbsences = absences;
                 renderAbsences(absences);
                 updateStats(absences);
+            }
+        }
+
+        function exportAbsences() {
+            if (currentAbsences.length === 0) return showAlert('No hay datos para exportar', 'warning');
+
+            const columns = ['Empleado', 'Tipo', 'Inicio', 'Fin', 'Estado', 'Tienda', 'Certificado'];
+            const rows = currentAbsences.map(a => [
+                a.full_name,
+                getTypeLabel(a.type),
+                formatDate(a.start_date),
+                formatDate(a.end_date),
+                a.status === 'active' ? 'ACTIVA' : 'CERRADA',
+                a.location,
+                a.medical_certificate ? 'SÍ' : 'NO'
+            ]);
+
+            reportsUtil.exportTable('LISTADO DE BAJAS MÉDICAS', columns, rows, 'Listado_Bajas');
+        }
+
+        async function printJustification(id) {
+            const a = currentAbsences.find(a => a.id === id);
+            if (a) {
+                reportsUtil.generateJustification(a, 'Baja Médica (' + getTypeLabel(a.type) + ')');
             }
         }
 
@@ -140,8 +191,9 @@
                     <td>${formatDate(a.end_date)}</td>
                     <td><span class="badge badge-${a.status === 'active' ? 'warning' : 'success'}">${a.status === 'active' ? 'Activa' : 'Cerrada'}</span></td>
                     <td>${a.medical_certificate ? '✓ Sí' : '✗ No'}</td>
-                    <td>
-                        ${a.status === 'active' ? `<button onclick="closeAbsence(${a.id})" class="btn btn-sm btn-success">Cerrar Baja</button>` : '-'}
+                    <td class="action-buttons">
+                        ${a.status === 'active' ? `<button onclick="closeAbsence(${a.id})" class="btn btn-sm btn-success">Cerrar</button>` : ''}
+                        <button onclick="printJustification(${a.id})" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
                     </td>
                 </tr>
             `).join('');
@@ -167,12 +219,12 @@
 
         async function closeAbsence(id) {
             if (!confirm('¿Estás seguro de que quieres cerrar esta baja?')) return;
-            
-            const result = await absencesAPI.update(id, { 
+
+            const result = await absencesAPI.update(id, {
                 status: 'closed',
                 end_date: new Date().toISOString().split('T')[0]
             });
-            
+
             if (result) {
                 showAlert('Baja cerrada correctamente', 'success');
                 loadAbsences();
@@ -218,4 +270,5 @@
         loadAbsences();
     </script>
 </body>
+
 </html>

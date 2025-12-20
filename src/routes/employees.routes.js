@@ -103,6 +103,18 @@ router.get('/stats', async (req, res) => {
         );
         stats.activeAbsences = activeAbsences.count;
 
+        // Permisos pendientes (asuntos propios, etc)
+        const pendingPermissions = await dbGet(
+            'SELECT COUNT(*) as count FROM vacations WHERE status = "pending" AND type != "vacation"'
+        );
+        stats.pendingPermissions = pendingPermissions.count;
+
+        // Ajustar vacaciones pendientes para que solo cuente tipo 'vacation'
+        const pendingVacations = await dbGet(
+            'SELECT COUNT(*) as count FROM vacations WHERE status = "pending" AND type = "vacation"'
+        );
+        stats.vacationsPending = pendingVacations.count;
+
         res.json(stats);
 
     } catch (error) {

@@ -1,35 +1,52 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vacaciones - Sistema de Gestión</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
-    <style>
-        body { display: grid; grid-template-columns: 260px 1fr; margin: 0; }
-        .sidebar { background: var(--bg-sidebar); border-right: 1px solid rgba(255, 255, 255, 0.05); padding: var(--spacing-lg); position: fixed; height: 100vh; width: 260px; }
-        .main-content { margin-left: 260px; padding: var(--spacing-xl); }
-    </style>
 </head>
+
 <body>
     <aside class="sidebar">
-        <div style="padding: var(--spacing-lg) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: var(--spacing-lg);">
-            <div style="display: flex; align-items: center; gap: var(--spacing-md); font-size: 1.25rem; font-weight: 700; color: var(--primary-light);"><span>👥</span><span>Gestión RH</span></div>
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span>👥</span><span>Gestión RH</span>
+            </div>
         </div>
-        <ul style="list-style: none;">
-            <li style="margin-bottom: var(--spacing-sm);"><a href="dashboard.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">📊 Dashboard</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a href="employees.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">👤 Trabajadores</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a  href="vacations.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--primary-light); background: rgba(99, 102, 241, 0.1); text-decoration: none; border-radius: var(--radius-md);">🏖️ Vacaciones</a></li>
-            <li style="margin-bottom: var(--spacing-sm);"><a href="absences.html" style="display: flex; align-items: center; gap: var(--spacing-md); padding: 0.75rem var(--spacing-md); color: var(--text-secondary); text-decoration: none; border-radius: var(--radius-md);">🏥 Bajas Médicas</a></li>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link active"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a>
+            </li>
         </ul>
-        <div style="margin-top: auto; padding-top: var(--spacing-xl);"><button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button></div>
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button>
+        </div>
     </aside>
 
     <main class="main-content">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xl);">
-            <div><h1 style="margin: 0;">Gestión de Vacaciones</h1></div>
-            <button onclick="showNewVacationModal()" class="btn btn-primary">➕ Nueva Solicitud</button>
+        <div class="card fade-in" style="margin-bottom: var(--spacing-xl);">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);">
+                <div>
+                    <h1 style="margin: 0;">Gestión de Vacaciones</h1>
+                    <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Control de solicitudes y disponibilidad
+                        de personal</p>
+                </div>
+                <div class="actions-grid" style="padding-top: 0;">
+                    <button onclick="exportVacations()" class="btn btn-secondary">
+                        <span>📤</span> Exportar PDF
+                    </button>
+                    <button onclick="showNewVacationModal()" class="btn btn-primary">
+                        <span>🏖️</span> Nueva Solicitud
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div id="alert-container"></div>
@@ -63,7 +80,9 @@
                         </tr>
                     </thead>
                     <tbody id="vacationsTable">
-                        <tr><td colspan="6" style="text-align: center; padding: 2rem;">Cargando...</td></tr>
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 2rem;">Cargando...</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -72,6 +91,7 @@
 
     <div id="vacationModal" class="modal">
         <div class="modal-content">
+            <button class="btn-close" onclick="closeModal()" title="Cerrar">×</button>
             <h2>Nueva Solicitud de Vacaciones</h2>
             <form id="vacationForm">
                 <div class="form-group">
@@ -105,14 +125,43 @@
     </div>
 
     <script src="js/api.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="js/reports.js"></script>
     <script>
         if (!isAuthenticated()) window.location.href = 'index.html';
 
+        let currentVacations = [];
+
         async function loadVacations() {
-            const vacations = await vacationsAPI.getAll();
+            const vacations = await vacationsAPI.getAll({ type: 'vacation' });
             if (vacations) {
+                currentVacations = vacations;
                 renderVacations(vacations);
                 updateStats(vacations);
+            }
+        }
+
+        function exportVacations() {
+            if (currentVacations.length === 0) return showAlert('No hay datos para exportar', 'warning');
+
+            const columns = ['Empleado', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Tienda', 'Estado'];
+            const rows = currentVacations.map(v => [
+                v.full_name,
+                formatDate(v.start_date),
+                formatDate(v.end_date),
+                v.days,
+                v.location,
+                v.status.toUpperCase()
+            ]);
+
+            reportsUtil.exportTable('LISTADO DE VACACIONES', columns, rows, 'Listado_Vacaciones');
+        }
+
+        async function printJustification(id) {
+            const v = currentVacations.find(v => v.id === id);
+            if (v) {
+                reportsUtil.generateJustification(v, 'Vacaciones');
             }
         }
 
@@ -130,11 +179,12 @@
                     <td>${v.days}</td>
                     <td><span class="badge badge-info">${v.type === 'vacation' ? 'Vacaciones' : v.type === 'personal' ? 'Personal' : 'Compensatorio'}</span></td>
                     <td><span class="badge badge-${v.status === 'approved' ? 'success' : v.status === 'rejected' ? 'error' : 'warning'}">${v.status === 'approved' ? 'Aprobada' : v.status === 'rejected' ? 'Rechazada' : 'Pendiente'}</span></td>
-                    <td>
+                    <td class="action-buttons">
                         ${v.status === 'pending' ? `
-                            <button onclick="approveVacation(${v.id})" class="btn btn-sm btn-success">✓ Aprobar</button>
-                            <button onclick="rejectVacation(${v.id})" class="btn btn-sm btn-danger">✗ Rechazar</button>
-                        ` : '-'}
+                            <button onclick="approveVacation(${v.id})" class="btn btn-sm btn-success" title="Aprobar">✓</button>
+                            <button onclick="rejectVacation(${v.id})" class="btn btn-sm btn-danger" title="Rechazar">✗</button>
+                        ` : ''}
+                        <button onclick="printJustification(${v.id})" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
                     </td>
                 </tr>
             `).join('');
@@ -197,7 +247,12 @@
             }
         });
 
+        document.getElementById('vacationModal').addEventListener('click', (e) => {
+            if (e.target.id === 'vacationModal') closeModal();
+        });
+
         loadVacations();
     </script>
 </body>
+
 </html>
