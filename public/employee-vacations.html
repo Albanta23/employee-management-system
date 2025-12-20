@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mis Vacaciones - Gestión RH</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body style="background: #0f172a; padding: 1.5rem; padding-bottom: 80px;">
+    <a href="employee-dashboard.html"
+        style="color: var(--text-muted); text-decoration: none; display: block; margin-bottom: 1.5rem;">⬅️ Volver</a>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h1 style="margin: 0;">Mis Vacaciones</h1>
+        <a href="employee-requests.html?type=vacation" class="btn btn-primary" style="padding: 0.5rem 1rem;">➕ Nueva</a>
+    </div>
+
+    <div id="vacations-list">
+        <!-- Cargado dinámicamente -->
+        <p style="text-align: center; color: var(--text-muted); padding: 2rem;">Cargando solicitudes...</p>
+    </div>
+
+    <nav class="bottom-nav"
+        style="position: fixed; bottom: 0; left: 0; right: 0; background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); display: flex; justify-content: space-around; padding: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+        <a href="employee-dashboard.html"
+            style="text-decoration: none; color: var(--text-muted); text-align: center;">🏠<br><small>Inicio</small></a>
+        <a href="employee-vacations.html"
+            style="text-decoration: none; color: var(--primary-light); text-align: center;">🏖️<br><small>Vacas</small></a>
+        <a href="employee-reports.html"
+            style="text-decoration: none; color: var(--text-muted); text-align: center;">📋<br><small>Informes</small></a>
+    </nav>
+
+    <script src="js/api.js"></script>
+    <script>
+        const user = getUser();
+        if (!user) window.location.href = 'index.html';
+
+        async function loadVacations() {
+            const data = await vacationsAPI.getAll({ employee_id: user.employee_id });
+            const container = document.getElementById('vacations-list');
+
+            if (!data || data.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 3rem 1rem;">
+                        <span style="font-size: 3rem; display: block; margin-bottom: 1rem;">🏖️</span>
+                        <p style="color: var(--text-muted);">No tienes solicitudes de vacaciones registradas.</p>
+                        <a href="employee-requests.html?type=vacation" class="btn btn-primary" style="margin-top: 1rem;">Solicitar ahora</a>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = data.map(v => `
+                <div class="card" style="margin-bottom: 1rem; padding: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                        <div>
+                            <h4 style="margin: 0;">${v.type === 'vacation' ? 'Vacaciones' : 'Permiso'}</h4>
+                            <p style="color: var(--text-muted); font-size: 0.8125rem; margin: 0.25rem 0 0 0;">Solicitado el ${formatDate(v.created_at)}</p>
+                        </div>
+                        <span class="badge badge-${v.status === 'approved' ? 'success' : v.status === 'pending' ? 'warning' : 'danger'}">
+                            ${v.status.toUpperCase()}
+                        </span>
+                    </div>
+                    <div style="display: flex; gap: 2rem; background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: var(--radius-md);">
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Desde</div>
+                            <div style="font-weight: 600;">${formatDate(v.start_date)}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Hasta</div>
+                            <div style="font-weight: 600;">${formatDate(v.end_date)}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Días</div>
+                            <div style="font-weight: 600;">${v.days}</div>
+                        </div>
+                    </div>
+                    ${v.reason ? `<p style="font-size: 0.875rem; color: var(--text-muted); margin-top: 1rem;">" ${v.reason} "</p>` : ''}
+                </div>
+            `).join('');
+        }
+
+        loadVacations();
+    </script>
+</body>
+
+</html>

@@ -218,9 +218,9 @@
                         </span>
                     </td>
                     <td class="action-buttons">
-                        <a href="employee-form.html?id=${emp.id}" class="btn btn-sm btn-secondary" title="Editar">✏️</a>
-                        <a href="permissions.html?employee_id=${emp.id}" class="btn btn-sm btn-secondary" title="Permisos">📄</a>
-                        <button onclick="deleteEmployee(${emp.id}, '${emp.full_name}')" class="btn btn-sm btn-danger" title="Eliminar">🗑️</button>
+                        <a href="employee-form.html?id=${emp._id}" class="btn btn-sm btn-secondary" title="Editar">✏️</a>
+                        <a href="permissions.html?employee_id=${emp._id}" class="btn btn-sm btn-secondary" title="Permisos">📄</a>
+                        <button onclick="deleteEmployee('${emp._id}', '${emp.full_name}')" class="btn btn-sm btn-danger" title="Eliminar">🗑️</button>
                     </td>
                 </tr>
             `).join('');

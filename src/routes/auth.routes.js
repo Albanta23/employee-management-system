@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { dbGet } = require('../database/db');
+const User = require('../models/User');
 require('dotenv').config();
 
 // Login
@@ -14,8 +14,8 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
         }
 
-        // Buscar usuario
-        const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
+        // Buscar usuario en MongoDB
+        const user = await User.findOne({ username });
 
         if (!user) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -30,7 +30,12 @@ router.post('/login', async (req, res) => {
 
         // Generar token
         const token = jwt.sign(
-            { id: user.id, username: user.username },
+            {
+                id: user._id,
+                username: user.username,
+                role: user.role || 'admin',
+                employee_id: user.employee_id
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -38,10 +43,12 @@ router.post('/login', async (req, res) => {
         res.json({
             token,
             user: {
-                id: user.id,
+                id: user._id,
                 username: user.username,
                 name: user.name,
-                email: user.email
+                email: user.email,
+                role: user.role || 'admin',
+                employee_id: user.employee_id
             }
         });
 
@@ -51,7 +58,17 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// Logout (cliente debe eliminar el token)
+// Obtener acceso de un empleado (para el admin)
+router.get('/user-access/:employee_id', async (req, res) => {
+    try {
+        const user = await User.findOne({ employee_id: req.params.employee_id }).select('username role');
+        res.json(user || {});
+    } catch (error) {
+        res.status(500).json({ error: 'Error al obtener acceso' });
+    }
+});
+
+// Logout
 router.post('/logout', (req, res) => {
     res.json({ message: 'Sesión cerrada correctamente' });
 });

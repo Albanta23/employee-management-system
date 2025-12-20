@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nueva Solicitud - Gestión RH</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        body {
+            background: #0f172a;
+            padding: 1.5rem;
+        }
+
+        .back-link {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            margin-bottom: 2rem;
+        }
+
+        .form-card {
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(20px);
+            border-radius: var(--radius-xl);
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .type-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .type-btn {
+            padding: 0.75rem;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .type-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="alert-container"></div>
+
+    <a href="employee-dashboard.html" class="back-link">
+        <i>⬅️</i> Volver a Inicio
+    </a>
+
+    <h1 id="page-title" style="margin-bottom: 1.5rem;">Nueva Solicitud</h1>
+
+    <div class="form-card">
+        <form id="requestForm">
+            <div id="type-section">
+                <label class="form-label">¿Qué necesitas solicitar?</label>
+                <div class="type-selector" id="main-type">
+                    <div class="type-btn" data-type="vacation" onclick="setType('vacation', this)">🏖️ Vacaciones</div>
+                    <div class="type-btn" data-type="permission" onclick="setType('permission', this)">📄 Permiso</div>
+                    <div class="type-btn" data-type="medical" onclick="setType('medical', this)">🏥 Baja Médica</div>
+                    <div class="type-btn" data-type="other" onclick="setType('other', this)">❓ Otro</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2">
+                <div class="form-group">
+                    <label class="form-label">Fecha Inicio</label>
+                    <input type="date" id="start_date" class="form-control" required>
+                </div>
+                <div class="form-group" id="end-date-group">
+                    <label class="form-label">Fecha Fin (Opcional)</label>
+                    <input type="date" id="end_date" class="form-control">
+                </div>
+            </div>
+
+            <div class="form-group" id="subtype-group" style="display: none;">
+                <label class="form-label">Especifique el motivo</label>
+                <select id="type" class="form-select">
+                    <!-- Dinámico -->
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Notas / Observaciones</label>
+                <textarea id="reason" class="form-control" rows="4"
+                    placeholder="Indique detalles relevantes..."></textarea>
+            </div>
+
+            <div id="medical-fields"
+                style="display: none; margin-bottom: 1.5rem; padding: 1rem; background: rgba(239, 68, 68, 0.05); border-radius: var(--radius-md);">
+                <label class="form-label">
+                    <input type="checkbox" id="medical_certificate"> Dispongo de justificante médico
+                </label>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; height: 50px; font-weight: 700;">
+                ENVIAR SOLICITUD
+            </button>
+        </form>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script>
+        const user = getUser();
+        if (!user || user.role !== 'employee') window.location.href = 'index.html';
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentCategory = urlParams.get('type') || 'vacation';
+
+        function setType(cat, el) {
+            currentCategory = cat;
+            document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+            if (el) el.classList.add('active');
+            else document.querySelector(`[data-type="${cat}"]`)?.classList.add('active');
+
+            // Ajustar sub-tipos
+            const subtypeGroup = document.getElementById('subtype-group');
+            const subtypeSelect = document.getElementById('type');
+            const medicalFields = document.getElementById('medical-fields');
+
+            medicalFields.style.display = (cat === 'medical') ? 'block' : 'none';
+
+            if (cat === 'permission' || cat === 'medical') {
+                subtypeGroup.style.display = 'block';
+                subtypeSelect.innerHTML = cat === 'permission'
+                    ? `
+                        <option value="marriage">Matrimonio (Convenio)</option>
+                        <option value="birth">Nacimiento/Cuidado (Convenio)</option>
+                        <option value="death">Fallecimiento familiar</option>
+                        <option value="moving">Traslado domicilio</option>
+                        <option value="duty">Deber público</option>
+                        <option value="personal">Asuntos Propios</option>
+                    `
+                    : `
+                        <option value="medical">Enfermedad Común</option>
+                        <option value="accident">Accidente Laboral</option>
+                        <option value="maternity">Maternidad</option>
+                        <option value="paternity">Paternidad</option>
+                    `;
+            } else {
+                subtypeGroup.style.display = 'none';
+                subtypeSelect.innerHTML = cat === 'vacation' ? '<option value="vacation">Vacaciones</option>' : '<option value="other">Otro</option>';
+            }
+        }
+
+        setType(currentCategory, null);
+
+        document.getElementById('requestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value || startDate;
+
+            // Calcular días (aproximado)
+            const days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1;
+
+            const data = {
+                employee_id: user.employee_id,
+                start_date: startDate,
+                end_date: endDate,
+                days: days,
+                type: document.getElementById('type').value || currentCategory,
+                reason: document.getElementById('reason').value,
+                notes: document.getElementById('reason').value,
+                medical_certificate: document.getElementById('medical_certificate')?.checked || false,
+                status: currentCategory === 'medical' ? 'active' : 'pending' // Las bajas médicas suelen entrar como activas
+            };
+
+            let result;
+            if (currentCategory === 'medical') {
+                result = await absencesAPI.create(data);
+            } else {
+                result = await vacationsAPI.create(data);
+            }
+
+            if (result) {
+                showAlert('Solicitud enviada correctamente', 'success');
+                setTimeout(() => window.location.href = 'employee-dashboard.html', 1500);
+            }
+        });
+    </script>
+</body>
+
+</html>

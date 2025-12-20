@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mis Informes - Gestión RH</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="js/reports.js"></script>
+</head>
+
+<body style="background: #0f172a; padding: 1.5rem; padding-bottom: 80px;">
+    <a href="employee-dashboard.html"
+        style="color: var(--text-muted); text-decoration: none; display: block; margin-bottom: 1.5rem;">⬅️ Volver</a>
+
+    <h1 style="margin-bottom: 1.5rem;">Registro de Jornada</h1>
+
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="form-group">
+            <label class="form-label">Mes de Consulta</label>
+            <div style="display: flex; gap: 1rem;">
+                <input type="month" id="month-filter" class="form-control" onchange="loadReport()">
+                <button onclick="exportAttendance()" class="btn btn-secondary"
+                    style="flex-shrink: 0; padding: 0.5rem 1rem;">
+                    📤 PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="report-content">
+        <!-- Cargado dinámicamente -->
+    </div>
+
+    <nav class="bottom-nav"
+        style="position: fixed; bottom: 0; left: 0; right: 0; background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); display: flex; justify-content: space-around; padding: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+        <a href="employee-dashboard.html"
+            style="text-decoration: none; color: var(--text-muted); text-align: center;">🏠<br><small>Inicio</small></a>
+        <a href="employee-vacations.html"
+            style="text-decoration: none; color: var(--text-muted); text-align: center;">🏖️<br><small>Vacas</small></a>
+        <a href="employee-reports.html"
+            style="text-decoration: none; color: var(--primary-light); text-align: center;">📋<br><small>Informes</small></a>
+    </nav>
+
+    <script src="js/api.js"></script>
+    <script>
+        const user = getUser();
+        if (!user) window.location.href = 'index.html';
+
+        const monthInput = document.getElementById('month-filter');
+        const now = new Date();
+        monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+        let currentAttendanceData = [];
+
+        async function loadReport() {
+            const monthStr = monthInput.value;
+            const [year, month] = monthStr.split('-');
+            const startDate = `${year}-${month}-01`;
+            const endDate = `${year}-${month}-31`;
+
+            const data = await attendanceAPI.getReport({ start_date: startDate, end_date: endDate });
+            currentAttendanceData = data || [];
+            const container = document.getElementById('report-content');
+
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: var(--text-muted);">Sin registros este mes</p>';
+                return;
+            }
+
+            // Agrupar por día
+            const days = {};
+            data.forEach(log => {
+                const date = log.timestamp.split('T')[0];
+                if (!days[date]) days[date] = [];
+                days[date].push(log);
+            });
+
+            container.innerHTML = Object.keys(days).reverse().map(date => {
+                const logs = days[date];
+                return `
+                    <div class="card" style="margin-bottom: 1rem; padding: 1rem;">
+                        <h4 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
+                            ${new Date(date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        </h4>
+                        ${logs.map(l => `
+                            <div style="display: flex; justify-content: space-between; font-size: 0.875rem; margin-top: 0.5rem;">
+                                <span>${l.type === 'in' ? '🟢 Entrada' : l.type === 'out' ? '🔴 Salida' : '🟠 Pausa'}</span>
+                                <span style="font-family: monospace;">${new Date(l.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function exportAttendance() {
+            if (!currentAttendanceData || currentAttendanceData.length === 0) {
+                return showAlert('No hay registros para exportar', 'warning');
+            }
+
+            const monthStr = monthInput.value;
+            const columns = ['Día', 'Hora', 'Tipo', 'Ubicación'];
+            const rows = currentAttendanceData.map(log => [
+                formatDate(log.timestamp),
+                new Date(log.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+                log.type === 'in' ? 'Entrada' : log.type === 'out' ? 'Salida' : 'Pausa',
+                log.location || '-'
+            ]);
+
+            reportsUtil.exportTable(
+                `REGISTRO DE JORNADA - ${monthStr}`,
+                columns,
+                rows,
+                `Fichajes_${user.name.replace(/\s/g, '_')}_${monthStr}`
+            );
+        }
+
+        loadReport();
+    </script>
+</body>
+
+</html>

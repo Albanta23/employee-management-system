@@ -19,6 +19,8 @@
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
+            </li>
             <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
             <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
             <li class="menu-item"><a href="permissions.html" class="menu-link active"><span>📄</span> Ausencias y
@@ -160,24 +162,26 @@
         }
 
         function exportPermissions() {
-            if (currentPermissions.length === 0) return showAlert('No hay datos para exportar', 'warning');
+            if (!currentPermissions || currentPermissions.length === 0) {
+                return showAlert('No hay datos para exportar', 'warning');
+            }
 
             const columns = ['Empleado', 'Tipo', 'Inicio', 'Fin', 'Días', 'Tienda', 'Estado'];
             const rows = currentPermissions.map(p => [
-                p.full_name,
+                p.full_name || 'N/A',
                 getTypeLabel(p.type),
                 formatDate(p.start_date),
                 formatDate(p.end_date),
-                p.days,
-                p.location,
-                p.status.toUpperCase()
+                p.days || 0,
+                p.location || '-',
+                (p.status || 'pendiente').toUpperCase()
             ]);
 
             reportsUtil.exportTable('LISTADO DE AUSENCIAS Y PERMISOS', columns, rows, 'Listado_Permisos');
         }
 
         async function printJustification(id) {
-            const p = currentPermissions.find(p => p.id === id);
+            const p = currentPermissions.find(p => p._id === id);
             if (p) {
                 reportsUtil.generateJustification(p, getTypeLabel(p.type));
             }
@@ -185,29 +189,32 @@
 
         function renderPermissions(perms) {
             const tbody = document.getElementById('permissionsTable');
-            if (perms.length === 0) {
+            if (!perms || perms.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 2rem;">No hay permisos registrados ${employeeIdParam ? 'para este trabajador' : ''}</td></tr>`;
                 return;
             }
 
-            tbody.innerHTML = perms.map(p => `
+            tbody.innerHTML = perms.map(p => {
+                const id = p._id || p.id;
+                const status = p.status || 'pending';
+                return `
                 <tr class="fade-in">
-                    <td><strong>${p.full_name}</strong><br><small style="color: var(--text-muted);">${p.position}</small></td>
+                    <td><strong>${p.full_name || 'N/A'}</strong><br><small style="color: var(--text-muted);">${p.position || ''}</small></td>
                     <td><span class="badge badge-info">${getTypeLabel(p.type)}</span></td>
                     <td>${formatDate(p.start_date)} - ${formatDate(p.end_date)}</td>
-                    <td>${p.days} día(s)</td>
-                    <td><span class="badge badge-${p.status === 'approved' ? 'success' : p.status === 'rejected' ? 'error' : 'warning'}">${getStatusLabel(p.status)}</span></td>
+                    <td>${p.days || 0} día(s)</td>
+                    <td><span class="badge badge-${status === 'approved' ? 'success' : status === 'rejected' ? 'error' : 'warning'}">${getStatusLabel(status)}</span></td>
                     <td class="action-buttons">
-                        ${p.status === 'pending' ? `
-                            <button onclick="updatePermStatus(${p.id}, 'approved')" class="btn btn-sm btn-success" title="Aprobar">✓</button>
-                            <button onclick="updatePermStatus(${p.id}, 'rejected')" class="btn btn-sm btn-danger" title="Rechazar">✗</button>
+                        ${status === 'pending' ? `
+                            <button onclick="updatePermStatus('${id}', 'approved')" class="btn btn-sm btn-success" title="Aprobar">✓</button>
+                            <button onclick="updatePermStatus('${id}', 'rejected')" class="btn btn-sm btn-danger" title="Rechazar">✗</button>
                         ` : ''}
-                        <button onclick="editPermission(${p.id})" class="btn btn-sm btn-secondary" title="Editar">✏️</button>
-                        <button onclick="printJustification(${p.id})" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
-                        <button onclick="deletePermission(${p.id})" class="btn btn-sm btn-danger" title="Eliminar">🗑️</button>
+                        <button onclick="editPermission('${id}')" class="btn btn-sm btn-secondary" title="Editar">✏️</button>
+                        <button onclick="printJustification('${id}')" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
+                        <button onclick="deletePermission('${id}')" class="btn btn-sm btn-danger" title="Eliminar">🗑️</button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function getTypeLabel(type) {
@@ -252,7 +259,7 @@
             const employees = await employeesAPI.getAll({ status: 'active', limit: 1000 });
             if (employees) {
                 const select = document.getElementById('employee_id');
-                select.innerHTML = employees.employees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+                select.innerHTML = employees.employees.map(e => `<option value="${e._id}">${e.full_name}</option>`).join('');
 
                 if (employeeIdParam) {
                     select.value = employeeIdParam;

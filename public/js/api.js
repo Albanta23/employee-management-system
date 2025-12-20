@@ -40,183 +40,97 @@ function handleAuthError(response) {
     return false;
 }
 
+// Generic API caller
+async function callAPI(url, options = {}) {
+    const defaultOptions = {
+        headers: getAuthHeaders()
+    };
+
+    const response = await fetch(url, { ...defaultOptions, ...options });
+
+    if (handleAuthError(response)) return null;
+
+    if (response.status === 204) return true;
+
+    const data = await response.json();
+    if (!response.ok) {
+        showAlert(data.error || 'Error en la petición', 'error');
+        return null;
+    }
+    return data;
+}
+
 // API - Empleados
 const employeesAPI = {
-    getAll: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
-        const url = `${API_URL}/employees${queryString ? '?' + queryString : ''}`;
-
-        const response = await fetch(url, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+    getAll: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/employees${query ? '?' + query : ''}`);
     },
-
-    getStats: async () => {
-        const response = await fetch(`${API_URL}/employees/stats`, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    getById: async (id) => {
-        const response = await fetch(`${API_URL}/employees/${id}`, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    create: async (data) => {
-        const response = await fetch(`${API_URL}/employees`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    update: async (id, data) => {
-        const response = await fetch(`${API_URL}/employees/${id}`, {
-            method: 'PUT',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    delete: async (id) => {
-        const response = await fetch(`${API_URL}/employees/${id}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    }
+    getStats: () => callAPI(`${API_URL}/employees/stats`),
+    getById: (id) => callAPI(`${API_URL}/employees/${id}`),
+    create: (data) => callAPI(`${API_URL}/employees`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    update: (id, data) => callAPI(`${API_URL}/employees/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    delete: (id) => callAPI(`${API_URL}/employees/${id}`, { method: 'DELETE' })
 };
 
 // API - Vacaciones
 const vacationsAPI = {
-    getAll: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
-        const url = `${API_URL}/vacations${queryString ? '?' + queryString : ''}`;
-
-        const response = await fetch(url, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+    getAll: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/vacations${query ? '?' + query : ''}`);
     },
-
-    getCalendar: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
-        const url = `${API_URL}/vacations/calendar${queryString ? '?' + queryString : ''}`;
-
-        const response = await fetch(url, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+    getCalendar: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/vacations/calendar?${query}`);
     },
-
-    getById: async (id) => {
-        const response = await fetch(`${API_URL}/vacations/${id}`, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    create: async (data) => {
-        const response = await fetch(`${API_URL}/vacations`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    update: async (id, data) => {
-        const response = await fetch(`${API_URL}/vacations/${id}`, {
-            method: 'PUT',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    delete: async (id) => {
-        const response = await fetch(`${API_URL}/vacations/${id}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    }
+    getById: (id) => callAPI(`${API_URL}/vacations/${id}`),
+    create: (data) => callAPI(`${API_URL}/vacations`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    update: (id, data) => callAPI(`${API_URL}/vacations/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    delete: (id) => callAPI(`${API_URL}/vacations/${id}`, { method: 'DELETE' })
 };
 
 // API - Bajas
 const absencesAPI = {
-    getAll: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
-        const url = `${API_URL}/absences${queryString ? '?' + queryString : ''}`;
-
-        const response = await fetch(url, {
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+    getAll: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/absences${query ? '?' + query : ''}`);
     },
+    create: (data) => callAPI(`${API_URL}/absences`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    update: (id, data) => callAPI(`${API_URL}/absences/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    delete: (id) => callAPI(`${API_URL}/absences/${id}`, { method: 'DELETE' })
+};
 
-    create: async (data) => {
-        const response = await fetch(`${API_URL}/absences`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+// Control Horario API
+const attendanceAPI = {
+    register: (data) => callAPI(`${API_URL}/attendance/register`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    getStatus: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/attendance/status?${query}`);
     },
-
-    update: async (id, data) => {
-        const response = await fetch(`${API_URL}/absences/${id}`, {
-            method: 'PUT',
-            headers: getAuthHeaders(),
-            body: JSON.stringify(data)
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
-    },
-
-    delete: async (id) => {
-        const response = await fetch(`${API_URL}/absences/${id}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-        });
-
-        if (handleAuthError(response)) return null;
-        return await response.json();
+    getReport: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/attendance/report?${query}`);
     }
 };
 
@@ -226,7 +140,7 @@ function showAlert(message, type = 'info') {
     alert.className = `alert alert-${type} fade-in`;
     alert.textContent = message;
 
-    const container = document.getElementById('alert-container') || document.querySelector('.container');
+    const container = document.getElementById('alert-container') || document.body;
     if (container) {
         container.insertBefore(alert, container.firstChild);
 

@@ -84,6 +84,40 @@
                         <label class="form-label" for="hire_date">Fecha de Alta</label>
                         <input type="date" id="hire_date" class="form-control">
                     </div>
+                    <div class="form-group">
+                        <label class="form-label" for="convention">Convenio Colectivo *</label>
+                        <select id="convention" class="form-select" required>
+                            <option value="">Seleccionar convenio...</option>
+                            <option value="Industrias Cárnicas Nacional">Industrias Cárnicas Nacional (Fábrica)</option>
+                            <option value="Comercio Alimentación Zamora">Comercio Alimentación (Zamora)</option>
+                            <option value="Comercio Alimentación Valladolid">Comercio Alimentación (Valladolid)</option>
+                            <option value="Comercio Alimentación Salamanca">Comercio Alimentación (Salamanca)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="card"
+                    style="background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--primary); margin-top: var(--spacing-lg);">
+                    <h3 style="margin-bottom: var(--spacing-md);">🔐 Acceso para Empleado (App Móvil/Tablet)</h3>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="enableAccess" onchange="toggleAccessFields()">
+                            Habilitar acceso al sistema para este trabajador
+                        </label>
+                    </div>
+                    <div id="accessFields" style="display: none;">
+                        <div class="grid grid-cols-2">
+                            <div class="form-group">
+                                <label class="form-label" for="username">Usuario (Login)</label>
+                                <input type="text" id="username" class="form-control" placeholder="Ej: marcos_rh">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="password">Contraseña</label>
+                                <input type="password" id="password" class="form-control"
+                                    placeholder="Escribir solo para cambiar">
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="notes">Notas</label>
@@ -102,7 +136,8 @@
         if (!isAuthenticated()) window.location.href = 'index.html';
 
         const urlParams = new URLSearchParams(window.location.search);
-        const employeeId = urlParams.get('id');
+        let employeeId = urlParams.get('id');
+        if (employeeId) employeeId = employeeId.trim();
         const isEdit = !!employeeId;
 
         if (isEdit) {
@@ -111,18 +146,51 @@
         }
 
         async function loadEmployee() {
-            const employee = await employeesAPI.getById(employeeId);
-            if (employee) {
-                document.getElementById('full_name').value = employee.full_name;
-                document.getElementById('dni').value = employee.dni;
-                document.getElementById('phone').value = employee.phone;
-                document.getElementById('email').value = employee.email || '';
-                document.getElementById('position').value = employee.position;
-                document.getElementById('location').value = employee.location;
-                document.getElementById('salary').value = employee.salary || '';
-                document.getElementById('hire_date').value = employee.hire_date || '';
-                document.getElementById('notes').value = employee.notes || '';
+            try {
+                const employee = await employeesAPI.getById(employeeId);
+                if (employee) {
+                    document.getElementById('full_name').value = employee.full_name || '';
+                    document.getElementById('dni').value = employee.dni || '';
+                    document.getElementById('phone').value = employee.phone || '';
+                    document.getElementById('email').value = employee.email || '';
+                    document.getElementById('position').value = employee.position || '';
+                    document.getElementById('location').value = employee.location || '';
+                    document.getElementById('salary').value = employee.salary || '';
+                    document.getElementById('notes').value = employee.notes || '';
+                    document.getElementById('convention').value = employee.convention || '';
+
+                    // Formatear fecha para el input (YYYY-MM-DD)
+                    if (employee.hire_date) {
+                        try {
+                            const date = new Date(employee.hire_date);
+                            if (!isNaN(date.getTime())) {
+                                const formattedDate = date.toISOString().split('T')[0];
+                                document.getElementById('hire_date').value = formattedDate;
+                            }
+                        } catch (e) {
+                            console.error('Error formateando fecha:', e);
+                        }
+                    }
+
+                    // Cargar datos de acceso si existen
+                    const access = await callAPI(`${API_URL}/auth/user-access/${employeeId}`);
+                    if (access && access.username) {
+                        document.getElementById('enableAccess').checked = true;
+                        document.getElementById('username').value = access.username;
+                        toggleAccessFields();
+                    }
+                } else {
+                    showAlert('No se pudo encontrar el trabajador', 'error');
+                }
+            } catch (error) {
+                console.error('Error al cargar empleado:', error);
+                showAlert('Error al conectar con el servidor', 'error');
             }
+        }
+
+        function toggleAccessFields() {
+            const enabled = document.getElementById('enableAccess').checked;
+            document.getElementById('accessFields').style.display = enabled ? 'block' : 'none';
         }
 
         document.getElementById('employeeForm').addEventListener('submit', async (e) => {
@@ -138,6 +206,10 @@
                 salary: document.getElementById('salary').value || null,
                 hire_date: document.getElementById('hire_date').value || null,
                 notes: document.getElementById('notes').value || null,
+                convention: document.getElementById('convention').value || null,
+                enableAccess: document.getElementById('enableAccess').checked,
+                username: document.getElementById('username').value || null,
+                password: document.getElementById('password').value || null,
                 status: 'active'
             };
 

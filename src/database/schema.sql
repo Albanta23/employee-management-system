@@ -1,10 +1,12 @@
--- Tabla de usuarios del sistema (administradores)
+-- Tabla de usuarios del sistema
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     name TEXT NOT NULL,
     email TEXT,
+    role TEXT DEFAULT 'admin' CHECK(role IN ('admin', 'employee')),
+    employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -17,6 +19,7 @@ CREATE TABLE IF NOT EXISTS employees (
     email TEXT,
     position TEXT NOT NULL,
     location TEXT NOT NULL,
+    convention TEXT,
     status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'on_leave')),
     hire_date DATE,
     termination_date DATE,
@@ -24,6 +27,20 @@ CREATE TABLE IF NOT EXISTS employees (
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tabla de registro horario (Control Horario)
+CREATE TABLE IF NOT EXISTS attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('in', 'out', 'break_start', 'break_end')),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    latitude REAL,
+    longitude REAL,
+    device_info TEXT,
+    notes TEXT,
+    ip_address TEXT,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
 );
 
 -- Tabla de vacaciones
@@ -83,5 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_vacations_dates ON vacations(start_date, end_date
 CREATE INDEX IF NOT EXISTS idx_absences_employee ON absences(employee_id);
 CREATE INDEX IF NOT EXISTS idx_absences_status ON absences(status);
 CREATE INDEX IF NOT EXISTS idx_employment_records_employee ON employment_records(employee_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_employee ON attendance(employee_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_timestamp ON attendance(timestamp);
 
 -- Usuario administrador se crea en el script de importación

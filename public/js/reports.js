@@ -15,6 +15,11 @@ const reportsUtil = {
      * Genera un justificante individual profesional
      */
     generateJustification: async (data, typeTitle) => {
+        if (!window.jspdf) {
+            console.error('jsPDF no cargado');
+            return alert('Error: La librería PDF no está cargada.');
+        }
+
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
         const config = reportsUtil.config;
@@ -26,7 +31,7 @@ const reportsUtil = {
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(22);
         doc.setFont('helvetica', 'bold');
-        doc.text('JUSTIFICANTE DE ' + typeTitle.toUpperCase(), 105, 20, { align: 'center' });
+        doc.text('JUSTIFICANTE DE ' + (typeTitle || 'SOLICITUD').toUpperCase(), 105, 20, { align: 'center' });
 
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
@@ -46,13 +51,13 @@ const reportsUtil = {
         y += 15;
         doc.setFontSize(11);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Nombre Completo: ${data.full_name}`, 25, y);
+        doc.text(`Nombre Completo: ${data.full_name || 'N/A'}`, 25, y);
         y += 8;
         doc.text(`DNI / Identificación: ${data.dni || '-'}`, 25, y);
         y += 8;
-        doc.text(`Puesto: ${data.position}`, 25, y);
+        doc.text(`Puesto: ${data.position || '-'}`, 25, y);
         y += 8;
-        doc.text(`Tienda / Ubicación: ${data.location}`, 25, y);
+        doc.text(`Tienda / Ubicación: ${data.location || '-'}`, 25, y);
 
         y += 20;
 
@@ -77,7 +82,7 @@ const reportsUtil = {
             y += 8;
         }
 
-        doc.text(`Tipo: ${typeTitle}`, 25, y);
+        doc.text(`Tipo: ${typeTitle || '-'}`, 25, y);
         y += 8;
 
         if (data.reason || data.notes) {
@@ -89,7 +94,7 @@ const reportsUtil = {
         }
 
         y += 10;
-        doc.text(`Estado: ${data.status.toUpperCase()}`, 25, y);
+        doc.text(`Estado: ${(data.status || 'pendiente').toUpperCase()}`, 25, y);
 
         // Sección: Firmas
         y = 230;
@@ -105,21 +110,24 @@ const reportsUtil = {
         // Pie de página
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
-        const today = new Date().toLocaleDateString();
+        const today = new Date().toLocaleDateString('es-ES');
         doc.text(`Documento generado el ${today} - Copia para el empleado y la empresa`, 105, 285, { align: 'center' });
 
-        doc.save(`Justificante_${data.full_name.replace(' ', '_')}_${today}.pdf`);
+        doc.save(`Justificante_${(data.full_name || 'Empleado').replace(/\s/g, '_')}.pdf`);
     },
 
     /**
      * Exporta una lista (tabla) a PDF
      */
     exportTable: (title, columns, rows, fileName, orientation = 'p') => {
+        if (!window.jspdf) {
+            console.error('jsPDF no cargado');
+            return alert('Error: La librería PDF no está cargada.');
+        }
+
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ orientation: orientation });
         const config = reportsUtil.config;
-
-        const pageWidth = orientation === 'l' ? 297 : 210;
 
         doc.setFontSize(18);
         doc.setTextColor(...config.secondaryColor);
@@ -127,7 +135,7 @@ const reportsUtil = {
 
         doc.setFontSize(10);
         doc.setTextColor(100);
-        doc.text(`${config.companyName} - Generado el ${new Date().toLocaleDateString()}`, 14, 30);
+        doc.text(`${config.companyName} - Generado el ${new Date().toLocaleDateString('es-ES')}`, 14, 30);
 
         doc.autoTable({
             startY: 40,
@@ -136,9 +144,8 @@ const reportsUtil = {
             headStyles: { fillColor: config.primaryColor },
             alternateRowStyles: { fillColor: [245, 247, 250] },
             margin: { top: 40 },
-            styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' },
+            styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
             columnStyles: {
-                // Ajuste automático para evitar que se corten textos largos
                 0: { cellWidth: 'auto' }
             }
         });

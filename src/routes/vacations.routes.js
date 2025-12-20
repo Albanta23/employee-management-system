@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { dbAll, dbGet, dbRun } = require('../database/db');
+const Vacation = require('../models/Vacation');
+const Employee = require('../models/Employee');
 const { authenticateToken } = require('../middleware/auth');
 
 router.use(authenticateToken);
@@ -9,95 +10,41 @@ router.use(authenticateToken);
 router.get('/', async (req, res) => {
     try {
         const { employee_id, status, year, type } = req.query;
+        const query = {};
 
-        let query = `
-            SELECT v.*, e.full_name, e.dni, e.position, e.location 
-            FROM vacations v
-            JOIN employees e ON v.employee_id = e.id
-            WHERE 1=1
-        `;
-        const params = [];
-
-        if (employee_id) {
-            query += ' AND v.employee_id = ?';
-            params.push(employee_id);
-        }
-
-        if (status) {
-            query += ' AND v.status = ?';
-            params.push(status);
-        }
-
+        if (employee_id) query.employee_id = employee_id;
+        if (status) query.status = status;
+        if (type) query.type = type;
         if (year) {
-            query += ' AND strftime("%Y", v.start_date) = ?';
-            params.push(year);
+            query.start_date = {
+                $gte: new Date(`${year}-01-01`),
+                $lte: new Date(`${year}-12-31`)
+            };
         }
 
-        if (type) {
-            query += ' AND v.type = ?';
-            params.push(type);
-        }
+        const vacations = await Vacation.find(query)
+            .populate('employee_id', 'full_name dni position location')
+            .sort({ start_date: -1 })
+            .lean()
+            .exec();
 
-        query += ' ORDER BY v.start_date DESC';
+        // Mapear para mantener compatibilidad con el frontend (id y nombres planos)
+        const formattedVacations = vacations.map(v => ({
+            ...v,
+            id: v._id.toString(),
+            _id: v._id.toString(),
+            full_name: v.employee_id?.full_name,
+            dni: v.employee_id?.dni,
+            position: v.employee_id?.position,
+            location: v.employee_id?.location,
+            employee_id: v.employee_id?._id.toString()
+        }));
 
-        const vacations = await dbAll(query, params);
-        res.json(vacations);
+        res.json(formattedVacations);
 
     } catch (error) {
         console.error('Error al obtener vacaciones:', error);
         res.status(500).json({ error: 'Error al obtener vacaciones' });
-    }
-});
-
-// Obtener calendario de vacaciones (para vista mensual/anual)
-router.get('/calendar', async (req, res) => {
-    try {
-        const { year = new Date().getFullYear(), month } = req.query;
-
-        let query = `
-            SELECT v.*, e.full_name, e.dni, e.position, e.location 
-            FROM vacations v
-            JOIN employees e ON v.employee_id = e.id
-            WHERE v.status = 'approved' AND strftime("%Y", v.start_date) = ?
-        `;
-        const params = [year.toString()];
-
-        if (month) {
-            query += ' AND strftime("%m", v.start_date) = ?';
-            params.push(month.toString().padStart(2, '0'));
-        }
-
-        query += ' ORDER BY v.start_date ASC';
-
-        const vacations = await dbAll(query, params);
-        res.json(vacations);
-
-    } catch (error) {
-        console.error('Error al obtener calendario:', error);
-        res.status(500).json({ error: 'Error al obtener calendario' });
-    }
-});
-
-// Obtener una solicitud por ID
-router.get('/:id', async (req, res) => {
-    try {
-        const vacation = await dbGet(
-            `SELECT v.*, e.full_name, e.dni, e.position, e.location 
-             FROM vacations v
-             JOIN employees e ON v.employee_id = e.id
-             WHERE v.id = ?`,
-            [req.params.id]
-        );
-
-        if (!vacation) {
-            return res.status(404).json({ error: 'Solicitud no encontrada' });
-        }
-
-        res.json(vacation);
-
-    } catch (error) {
-        console.error('Error al obtener solicitud:', error);
-        res.status(500).json({ error: 'Error al obtener solicitud' });
     }
 });
 
@@ -110,13 +57,12 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
         }
 
-        const result = await dbRun(
-            `INSERT INTO vacations (employee_id, start_date, end_date, days, type, reason, status)
-             VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-            [employee_id, start_date, end_date, days, type || 'vacation', reason || null]
-        );
+        const vacation = new Vacation({
+            employee_id, start_date, end_date, days, type, reason, status: 'pending'
+        });
 
-        res.status(201).json({ id: result.id, message: 'Solicitud de vacaciones creada' });
+        await vacation.save();
+        res.status(201).json({ id: vacation._id, message: 'Solicitud creada correctamente' });
 
     } catch (error) {
         console.error('Error al crear solicitud:', error);
@@ -124,47 +70,21 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Actualizar solicitud (estado o datos completos)
+// Actualizar estado de vacación (Aprobar/Rechazar)
 router.put('/:id', async (req, res) => {
     try {
-        const { status, reason, start_date, end_date, days, type } = req.body;
+        const { status, reason } = req.body;
 
-        // Si solo se envía el status, es una aprobación/rechazo
-        if (status && !start_date) {
-            if (!['pending', 'approved', 'rejected'].includes(status)) {
-                return res.status(400).json({ error: 'Estado inválido' });
-            }
-
-            const result = await dbRun(
-                `UPDATE vacations 
-                 SET status = ?, reason = ?, approved_by = ?, approved_date = CURRENT_TIMESTAMP 
-                 WHERE id = ?`,
-                [status, reason || null, req.user.id, req.params.id]
-            );
-
-            if (result.changes === 0) {
-                return res.status(404).json({ error: 'Solicitud no encontrada' });
-            }
-
-            return res.json({ message: 'Estado actualizado correctamente' });
+        const update = { status };
+        if (status === 'approved') {
+            update.approved_by = req.user.id;
+            update.approved_date = new Date();
         }
+        if (reason) update.reason = reason;
 
-        // Si se envían más datos, es una edición completa
-        if (!start_date || !end_date || !days) {
-            return res.status(400).json({ error: 'Faltan campos requeridos para la edición' });
-        }
+        const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
 
-        const result = await dbRun(
-            `UPDATE vacations 
-             SET start_date = ?, end_date = ?, days = ?, type = ?, reason = ? 
-             WHERE id = ?`,
-            [start_date, end_date, days, type || 'vacation', reason || null, req.params.id]
-        );
-
-        if (result.changes === 0) {
-            return res.status(404).json({ error: 'Solicitud no encontrada' });
-        }
-
+        if (!vacation) return res.status(404).json({ error: 'Solicitud no encontrada' });
         res.json({ message: 'Solicitud actualizada correctamente' });
 
     } catch (error) {
@@ -173,19 +93,31 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// Eliminar solicitud de vacaciones
+// Obtener una solicitud por ID
+router.get('/:id', async (req, res) => {
+    try {
+        const vacation = await Vacation.findById(req.params.id).populate('employee_id');
+        if (!vacation) return res.status(404).json({ error: 'Solicitud no encontrada' });
+
+        res.json({
+            ...vacation._doc,
+            id: vacation._id,
+            full_name: vacation.employee_id?.full_name,
+            dni: vacation.employee_id?.dni,
+            position: vacation.employee_id?.position,
+            location: vacation.employee_id?.location
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al obtener solicitud' });
+    }
+});
+
+// Eliminar solicitud
 router.delete('/:id', async (req, res) => {
     try {
-        const result = await dbRun('DELETE FROM vacations WHERE id = ?', [req.params.id]);
-
-        if (result.changes === 0) {
-            return res.status(404).json({ error: 'Solicitud no encontrada' });
-        }
-
+        await Vacation.findByIdAndDelete(req.params.id);
         res.json({ message: 'Solicitud eliminada correctamente' });
-
     } catch (error) {
-        console.error('Error al eliminar solicitud:', error);
         res.status(500).json({ error: 'Error al eliminar solicitud' });
     }
 });

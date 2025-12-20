@@ -19,6 +19,8 @@
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
+            </li>
             <li class="menu-item"><a href="vacations.html" class="menu-link active"><span>🏖️</span> Vacaciones</a></li>
             <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
             <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a>
@@ -143,23 +145,25 @@
         }
 
         function exportVacations() {
-            if (currentVacations.length === 0) return showAlert('No hay datos para exportar', 'warning');
+            if (!currentVacations || currentVacations.length === 0) {
+                return showAlert('No hay datos para exportar', 'warning');
+            }
 
             const columns = ['Empleado', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Tienda', 'Estado'];
             const rows = currentVacations.map(v => [
-                v.full_name,
+                v.full_name || 'N/A',
                 formatDate(v.start_date),
                 formatDate(v.end_date),
-                v.days,
-                v.location,
-                v.status.toUpperCase()
+                v.days || 0,
+                v.location || '-',
+                (v.status || 'pendiente').toUpperCase()
             ]);
 
             reportsUtil.exportTable('LISTADO DE VACACIONES', columns, rows, 'Listado_Vacaciones');
         }
 
         async function printJustification(id) {
-            const v = currentVacations.find(v => v.id === id);
+            const v = currentVacations.find(v => (v._id || v.id) === id);
             if (v) {
                 reportsUtil.generateJustification(v, 'Vacaciones');
             }
@@ -167,27 +171,30 @@
 
         function renderVacations(vacations) {
             const tbody = document.getElementById('vacationsTable');
-            if (vacations.length === 0) {
+            if (!vacations || vacations.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem;">No hay solicitudes de vacaciones</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = vacations.map(v => `
+            tbody.innerHTML = vacations.map(v => {
+                const id = v._id || v.id;
+                const status = v.status || 'pending';
+                return `
                 <tr>
-                    <td><strong>${v.full_name}</strong><br><small style="color: var(--text-muted);">${v.position} - ${v.location}</small></td>
+                    <td><strong>${v.full_name || 'N/A'}</strong><br><small style="color: var(--text-muted);">${v.position || ''} - ${v.location || ''}</small></td>
                     <td>${formatDate(v.start_date)} - ${formatDate(v.end_date)}</td>
-                    <td>${v.days}</td>
+                    <td>${v.days || 0}</td>
                     <td><span class="badge badge-info">${v.type === 'vacation' ? 'Vacaciones' : v.type === 'personal' ? 'Personal' : 'Compensatorio'}</span></td>
-                    <td><span class="badge badge-${v.status === 'approved' ? 'success' : v.status === 'rejected' ? 'error' : 'warning'}">${v.status === 'approved' ? 'Aprobada' : v.status === 'rejected' ? 'Rechazada' : 'Pendiente'}</span></td>
+                    <td><span class="badge badge-${status === 'approved' ? 'success' : status === 'rejected' ? 'error' : 'warning'}">${status === 'approved' ? 'Aprobada' : status === 'rejected' ? 'Rechazada' : 'Pendiente'}</span></td>
                     <td class="action-buttons">
-                        ${v.status === 'pending' ? `
-                            <button onclick="approveVacation(${v.id})" class="btn btn-sm btn-success" title="Aprobar">✓</button>
-                            <button onclick="rejectVacation(${v.id})" class="btn btn-sm btn-danger" title="Rechazar">✗</button>
+                        ${status === 'pending' ? `
+                            <button onclick="approveVacation('${id}')" class="btn btn-sm btn-success" title="Aprobar">✓</button>
+                            <button onclick="rejectVacation('${id}')" class="btn btn-sm btn-danger" title="Rechazar">✗</button>
                         ` : ''}
-                        <button onclick="printJustification(${v.id})" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
+                        <button onclick="printJustification('${id}')" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function updateStats(vacations) {
@@ -219,7 +226,7 @@
             const employees = await employeesAPI.getAll({ status: 'active', limit: 1000 });
             if (employees) {
                 const select = document.getElementById('employee_id');
-                select.innerHTML = employees.employees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+                select.innerHTML = employees.employees.map(e => `<option value="${e._id}">${e.full_name}</option>`).join('');
             }
             document.getElementById('vacationModal').classList.add('active');
         }

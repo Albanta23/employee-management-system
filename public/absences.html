@@ -19,6 +19,8 @@
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
+            </li>
             <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
             <li class="menu-item"><a href="absences.html" class="menu-link active"><span>🏥</span> Bajas Médicas</a>
             </li>
@@ -153,16 +155,18 @@
         }
 
         function exportAbsences() {
-            if (currentAbsences.length === 0) return showAlert('No hay datos para exportar', 'warning');
+            if (!currentAbsences || currentAbsences.length === 0) {
+                return showAlert('No hay datos para exportar', 'warning');
+            }
 
             const columns = ['Empleado', 'Tipo', 'Inicio', 'Fin', 'Estado', 'Tienda', 'Certificado'];
             const rows = currentAbsences.map(a => [
-                a.full_name,
+                a.full_name || 'N/A',
                 getTypeLabel(a.type),
                 formatDate(a.start_date),
                 formatDate(a.end_date),
-                a.status === 'active' ? 'ACTIVA' : 'CERRADA',
-                a.location,
+                (a.status === 'active' ? 'ACTIVA' : 'CERRADA'),
+                a.location || '-',
                 a.medical_certificate ? 'SÍ' : 'NO'
             ]);
 
@@ -170,7 +174,7 @@
         }
 
         async function printJustification(id) {
-            const a = currentAbsences.find(a => a.id === id);
+            const a = currentAbsences.find(a => a._id === id);
             if (a) {
                 reportsUtil.generateJustification(a, 'Baja Médica (' + getTypeLabel(a.type) + ')');
             }
@@ -178,25 +182,28 @@
 
         function renderAbsences(absences) {
             const tbody = document.getElementById('absencesTable');
-            if (absences.length === 0) {
+            if (!absences || absences.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No hay bajas registradas</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = absences.map(a => `
+            tbody.innerHTML = absences.map(a => {
+                const id = a._id || a.id;
+                const status = a.status || 'active';
+                return `
                 <tr>
-                    <td><strong>${a.full_name}</strong><br><small style="color: var(--text-muted);">${a.position} - ${a.location}</small></td>
+                    <td><strong>${a.full_name || 'N/A'}</strong><br><small style="color: var(--text-muted);">${a.position || ''} - ${a.location || ''}</small></td>
                     <td><span class="badge badge-info">${getTypeLabel(a.type)}</span></td>
                     <td>${formatDate(a.start_date)}</td>
                     <td>${formatDate(a.end_date)}</td>
-                    <td><span class="badge badge-${a.status === 'active' ? 'warning' : 'success'}">${a.status === 'active' ? 'Activa' : 'Cerrada'}</span></td>
+                    <td><span class="badge badge-${status === 'active' ? 'warning' : 'success'}">${status === 'active' ? 'Activa' : 'Cerrada'}</span></td>
                     <td>${a.medical_certificate ? '✓ Sí' : '✗ No'}</td>
                     <td class="action-buttons">
-                        ${a.status === 'active' ? `<button onclick="closeAbsence(${a.id})" class="btn btn-sm btn-success">Cerrar</button>` : ''}
-                        <button onclick="printJustification(${a.id})" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
+                        ${status === 'active' ? `<button onclick="closeAbsence('${id}')" class="btn btn-sm btn-success">Cerrar</button>` : ''}
+                        <button onclick="printJustification('${id}')" class="btn btn-sm btn-secondary" title="Imprimir Justificante">📄 PDF</button>
                     </td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function getTypeLabel(type) {
@@ -235,7 +242,7 @@
             const employees = await employeesAPI.getAll({ status: 'active', limit: 1000 });
             if (employees) {
                 const select = document.getElementById('employee_id');
-                select.innerHTML = employees.employees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+                select.innerHTML = employees.employees.map(e => `<option value="${e._id}">${e.full_name}</option>`).join('');
             }
             document.getElementById('absenceModal').classList.add('active');
         }

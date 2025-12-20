@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Portal del Empleado - Gestión RH</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        :root {
+            --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        body {
+            background: #0f172a;
+            padding-bottom: calc(80px + var(--safe-area-inset-bottom));
+        }
+
+        .header-mobile {
+            padding: 2rem 1.5rem;
+            background: linear-gradient(to bottom, rgba(30, 41, 59, 1), rgba(15, 23, 42, 0));
+            margin-bottom: 1rem;
+        }
+
+        .welcome-text h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            background: linear-gradient(135deg, #fff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .clock-container {
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        #digital-clock {
+            font-size: 3.5rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 0.5rem;
+            color: var(--primary-light);
+            text-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+
+        #digital-date {
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+        }
+
+        .status-none {
+            background: rgba(100, 116, 139, 0.1);
+            color: #94a3b8;
+        }
+
+        .status-in {
+            background: rgba(34, 197, 94, 0.1);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .status-break {
+            background: rgba(245, 158, 11, 0.1);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+
+        .fichar-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .btn-fichar {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            padding: 2rem 1rem;
+            border-radius: var(--radius-xl);
+            font-weight: 700;
+            font-size: 1rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-fichar:active {
+            transform: scale(0.95);
+        }
+
+        .btn-in {
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            color: white;
+            box-shadow: 0 10px 20px -5px rgba(34, 197, 94, 0.3);
+        }
+
+        .btn-out {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            box-shadow: 0 10px 20px -5px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-break {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            box-shadow: 0 10px 20px -5px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-resume {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: white;
+            box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-fichar i {
+            font-size: 2rem;
+        }
+
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(20px);
+            display: flex;
+            justify-content: space-around;
+            padding: 0.75rem 1rem calc(0.75rem + var(--safe-area-inset-bottom));
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 1000;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .nav-item.active {
+            color: var(--primary-light);
+        }
+
+        .nav-item i {
+            font-size: 1.5rem;
+        }
+
+        .section-title {
+            padding: 0 1.5rem;
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .request-card {
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            margin: 0 1.5rem 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .request-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-md);
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--primary-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .request-info {
+            flex: 1;
+        }
+
+        .request-info h4 {
+            margin: 0 0 0.25rem;
+            font-size: 1rem;
+        }
+
+        .request-info p {
+            margin: 0;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        #alert-container {
+            position: fixed;
+            top: 1rem;
+            left: 1rem;
+            right: 1rem;
+            z-index: 2000;
+        }
+
+        .quick-actions {
+            padding: 0 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .action-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem 1rem;
+            text-align: center;
+            text-decoration: none;
+            color: white;
+            transition: background 0.2s;
+        }
+
+        .action-card:active {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .action-card i {
+            font-size: 1.75rem;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        .action-card span {
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="alert-container"></div>
+
+    <header class="header-mobile">
+        <div class="welcome-text">
+            <p style="color: var(--text-muted); margin: 0;">Hola,</p>
+            <h1 id="user-name">Cargando...</h1>
+        </div>
+    </header>
+
+    <div class="clock-container">
+        <div id="digital-clock">00:00:00</div>
+        <div id="digital-date">Cargando fecha...</div>
+        <div id="current-status" class="status-badge status-none">
+            <span>⚪</span> No has fichado hoy
+        </div>
+
+        <div class="fichar-grid" id="fichar-controls">
+            <!-- Cargado dinámicamente -->
+        </div>
+    </div>
+
+    <div class="section-title">
+        Solicitudes Rápidas
+    </div>
+
+    <div class="quick-actions">
+        <a href="employee-requests.html?type=vacation" class="action-card">
+            <i>🏖️</i>
+            <span>Vacaciones</span>
+        </a>
+        <a href="employee-requests.html?type=permission" class="action-card">
+            <i>📄</i>
+            <span>Permisos</span>
+        </a>
+        <a href="employee-requests.html?type=medical" class="action-card">
+            <i>🏥</i>
+            <span>Baja Médica</span>
+        </a>
+        <a href="#" onclick="logout()" class="action-card">
+            <i>🚪</i>
+            <span>Cerrar Sesión</span>
+        </a>
+    </div>
+
+    <div class="section-title">
+        Mis Últimos Fichajes
+    </div>
+
+    <div id="recent-logs">
+        <!-- Cargado dinámicamente -->
+        <p style="text-align: center; color: var(--text-muted); padding: 2rem;">Cargando registros...</p>
+    </div>
+
+    <nav class="bottom-nav">
+        <a href="employee-dashboard.html" class="nav-item active">
+            <i>🏠</i>
+            <span>Inicio</span>
+        </a>
+        <a href="employee-vacations.html" class="nav-item">
+            <i>🏖️</i>
+            <span>Mis Vacas</span>
+        </a>
+        <a href="employee-reports.html" class="nav-item">
+            <i>📋</i>
+            <span>Informes</span>
+        </a>
+        <a href="employee-profile.html" class="nav-item">
+            <i>👤</i>
+            <span>Perfil</span>
+        </a>
+    </nav>
+
+    <script src="js/api.js"></script>
+    <script>
+        const user = getUser();
+        if (!user || user.role !== 'employee') window.location.href = 'index.html';
+
+        document.getElementById('user-name').textContent = user.name.split(' ')[0] + ' 👋';
+
+        // Digital Clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('digital-clock').textContent = now.toLocaleTimeString('es-ES', { hour12: false });
+            document.getElementById('digital-date').textContent = now.toLocaleDateString('es-ES', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long'
+            });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Control Horario Logic
+        let currentStatus = 'none';
+
+        async function loadStatus() {
+            const data = await attendanceAPI.getStatus();
+            if (data) {
+                currentStatus = data.todayStatus;
+                renderControls();
+                updateStatusBadge(currentStatus);
+                loadHistory();
+            }
+        }
+
+        function updateStatusBadge(status) {
+            const badge = document.getElementById('current-status');
+            const map = {
+                'none': { label: 'No has fichado hoy', emoji: '⚪', class: 'status-none' },
+                'in': { label: 'En el trabajo', emoji: '🟢', class: 'status-in' },
+                'out': { label: 'Jornada finalizada', emoji: '🔴', class: 'status-none' },
+                'break_start': { label: 'En descanso', emoji: '🟠', class: 'status-break' },
+                'break_end': { label: 'De vuelta del descanso', emoji: '🟢', class: 'status-in' }
+            };
+            const config = map[status] || map.none;
+            badge.className = 'status-badge ' + config.class;
+            badge.innerHTML = `<span>${config.emoji}</span> ${config.label}`;
+        }
+
+        function renderControls() {
+            const container = document.getElementById('fichar-controls');
+            let buttons = '';
+
+            if (currentStatus === 'none' || currentStatus === 'out') {
+                buttons = `
+                    <button class="btn-fichar btn-in" onclick="fichar('in')" style="grid-column: 1 / span 2;">
+                        <i>📍</i> EMPRENDER JORNADA
+                    </button>
+                `;
+            } else if (currentStatus === 'in' || currentStatus === 'break_end') {
+                buttons = `
+                    <button class="btn-fichar btn-break" onclick="fichar('break_start')">
+                        <i>☕</i> DESCANSO
+                    </button>
+                    <button class="btn-fichar btn-out" onclick="fichar('out')">
+                        <i>🏠</i> SALIR
+                    </button>
+                `;
+            } else if (currentStatus === 'break_start') {
+                buttons = `
+                    <button class="btn-fichar btn-resume" onclick="fichar('break_end')" style="grid-column: 1 / span 2;">
+                        <i>🔄</i> REANUDAR TRABAJO
+                    </button>
+                `;
+            }
+
+            container.innerHTML = buttons;
+        }
+
+        async function fichar(type) {
+            // Obtener geolocalización
+            let latitude = null, longitude = null;
+            if ("geolocation" in navigator) {
+                try {
+                    const pos = await new Promise((res, rej) => {
+                        navigator.geolocation.getCurrentPosition(res, rej, { timeout: 5000 });
+                    });
+                    latitude = pos.coords.latitude;
+                    longitude = pos.coords.longitude;
+                } catch (e) {
+                    console.warn('Geo no disponible:', e.message);
+                }
+            }
+
+            const device_info = `${navigator.platform} - ${navigator.userAgent.substring(0, 50)}`;
+
+            const result = await attendanceAPI.register({
+                type,
+                latitude,
+                longitude,
+                device_info
+            });
+
+            if (result) {
+                showAlert('Registro guardado: ' + type.toUpperCase(), 'success');
+                loadStatus();
+            }
+        }
+
+        async function loadHistory() {
+            const data = await attendanceAPI.getReport({
+                start_date: new Date().toISOString().split('T')[0]
+            });
+
+            const container = document.getElementById('recent-logs');
+            if (!data || data.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: var(--text-muted); padding: 1rem;">Sin registros hoy</p>';
+                return;
+            }
+
+            const emojis = { in: '📍', out: '🏠', break_start: '☕', break_end: '🔄' };
+            const labels = { in: 'Entrada', out: 'Salida', break_start: 'Inicio Descanso', break_end: 'Fin Descanso' };
+
+            container.innerHTML = data.reverse().map(log => `
+                <div class="request-card">
+                    <div class="request-icon" style="background: ${log.type === 'in' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)'}">
+                        ${emojis[log.type]}
+                    </div>
+                    <div class="request-info">
+                        <h4>${labels[log.type]}</h4>
+                        <p>${new Date(log.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} • ${log.location || 'Ubicación GPS'}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        loadStatus();
+    </script>
+</body>
+
+</html>
