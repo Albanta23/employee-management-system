@@ -110,27 +110,33 @@ html.theme-light .sidebar-header {
 }
 
 html.theme-light .card {
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.1);
   box-shadow: var(--shadow-md);
 }
 
 html.theme-light .card-header {
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
 }
 
 html.theme-light .stat-card {
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  box-shadow: var(--shadow-sm);
+}
+
+html.theme-light .stat-value {
+  color: var(--primary-dark);
 }
 
 html.theme-light .btn-secondary {
   background: rgba(15, 23, 42, 0.04);
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  color: var(--text-primary);
 }
 
 html.theme-light .btn-secondary:hover {
-  background: rgba(15, 23, 42, 0.07);
+  background: rgba(15, 23, 42, 0.08);
 }
 
 html.theme-light .form-control,
@@ -156,12 +162,126 @@ html.theme-light .modal-content {
 }
 
 html.theme-light .table-container {
-  background: rgba(15, 23, 42, 0.03);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(15, 23, 42, 0.1);
 }
 
 html.theme-light th,
 html.theme-light td {
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+html.theme-light th {
+  color: var(--text-secondary);
+  background: rgba(15, 23, 42, 0.03);
+}
+
+html.theme-light .menu-link:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+html.theme-light .menu-link.active {
+  background: rgba(99, 102, 241, 0.15);
+}
+
+html.theme-light .modal-content {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: var(--shadow-xl);
+}
+
+html.theme-light .modal {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+/* === Overrides adicionales para tema claro === */
+
+/* Barras de navegación móvil */
+html.theme-light [style*="background: rgba(30, 41, 59"] {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-top-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Details/accordions */
+html.theme-light details.card,
+html.theme-light details[style*="background: rgba(30"],
+html.theme-light .day-group {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Summary headers dentro de details */
+html.theme-light details summary {
+  background: rgba(248, 250, 252, 0.9) !important;
+}
+
+/* Tarjetas con estilo inline */
+html.theme-light [style*="background: rgba(30, 41, 59, 0.5)"],
+html.theme-light [style*="background: rgba(30, 41, 59, 0.8)"],
+html.theme-light [style*="background: rgba(30, 41, 59, 0.9)"] {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Avatar containers */
+html.theme-light [style*="background: rgba(30,41,59"] {
+  background: rgba(241, 245, 249, 0.9) !important;
+}
+
+/* Elementos con fondo #1e293b */
+html.theme-light [style*="background: #1e293b"] {
+  background: #ffffff !important;
+  border: 1px solid rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Bordes claros en tema claro */
+html.theme-light [style*="border: 1px solid rgba(255, 255, 255"],
+html.theme-light [style*="border: 1px solid rgba(255,255,255"],
+html.theme-light [style*="border: 2px solid rgba(255,255,255"] {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Sidebar logo color en tema claro */
+html.theme-light .sidebar-logo {
+  color: var(--primary-dark);
+}
+
+/* Request cards y elementos similares */
+html.theme-light .request-card {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Bottom navigation móvil */
+html.theme-light .bottom-nav {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-top-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Header en páginas de empleado */
+html.theme-light .employee-header,
+html.theme-light [class*="header"][style*="background: rgba(30"] {
+  background: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* Info cards en perfil */
+html.theme-light .info-section,
+html.theme-light .profile-section {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Quick actions */
+html.theme-light .quick-action {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Attendance entries */
+html.theme-light .attendance-entry,
+html.theme-light .history-item {
+  background: rgba(248, 250, 252, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
 }
 
 /* Marca de agua global (esquina inferior derecha) */
