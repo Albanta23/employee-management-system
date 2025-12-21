@@ -284,6 +284,91 @@ html.theme-light .history-item {
   border-color: rgba(15, 23, 42, 0.08) !important;
 }
 
+/* === Action Cards (Solicitudes Rápidas en dashboard empleado) === */
+html.theme-light .action-card {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(15, 23, 42, 0.12) !important;
+  color: var(--text-primary) !important;
+}
+
+html.theme-light .action-card:hover,
+html.theme-light .action-card:active {
+  background: rgba(241, 245, 249, 1) !important;
+}
+
+html.theme-light .action-card span {
+  color: var(--text-primary) !important;
+}
+
+/* Quick actions grid */
+html.theme-light .quick-actions .action-card {
+  box-shadow: var(--shadow-sm);
+}
+
+/* Textos con color: white hardcodeado */
+html.theme-light [style*="color: white"],
+html.theme-light [style*="color:white"] {
+  color: var(--text-primary) !important;
+}
+
+/* Elementos con rgba(255,255,255, 0.0x) que son casi invisibles en claro */
+html.theme-light [style*="background: rgba(255, 255, 255, 0.03)"],
+html.theme-light [style*="background: rgba(255, 255, 255, 0.05)"] {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Nav items en bottom nav */
+html.theme-light .nav-item {
+  color: var(--text-secondary);
+}
+
+html.theme-light .nav-item.active {
+  color: var(--primary-dark);
+}
+
+/* Geo modal */
+html.theme-light #geo-notice-modal .modal-content {
+  background: #ffffff !important;
+  border-color: rgba(99, 102, 241, 0.2) !important;
+}
+
+/* === Employee Requests Page === */
+html.theme-light .form-card {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+html.theme-light .type-btn {
+  background: rgba(241, 245, 249, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: var(--text-secondary) !important;
+}
+
+html.theme-light .type-btn.active {
+  background: var(--primary) !important;
+  color: white !important;
+  border-color: var(--primary) !important;
+}
+
+/* === Employee Profile Page === */
+html.theme-light .info-group {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+html.theme-light .info-row {
+  border-bottom-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* === General overrides para cualquier elemento con fondo semi-transparente oscuro === */
+html.theme-light [style*="rgba(255, 255, 255, 0.03)"],
+html.theme-light [style*="rgba(255, 255, 255, 0.05)"],
+html.theme-light [style*="rgba(255, 255, 255, 0.08)"],
+html.theme-light [style*="rgba(255, 255, 255, 0.1)"] {
+  background: rgba(255, 255, 255, 0.95) !important;
+}
+
 /* Marca de agua global (esquina inferior derecha) */
 .app-watermark {
   position: fixed;
