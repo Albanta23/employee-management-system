@@ -122,6 +122,7 @@ const employeesAPI = {
         return callAPI(`${API_URL}/employees${query ? '?' + query : ''}`);
     },
     getStats: () => callAPI(`${API_URL}/employees/stats`),
+    getMe: () => callAPI(`${API_URL}/employees/me`),
     getById: (id) => callAPI(`${API_URL}/employees/${id}`),
     create: (data) => callAPI(`${API_URL}/employees`, {
         method: 'POST',

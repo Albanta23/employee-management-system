@@ -65,24 +65,30 @@ router.get('/status', async (req, res) => {
 // Obtener reporte de asistencia
 router.get('/report', async (req, res) => {
     try {
-        const hasAccess = await requireFeatureAccess(req, res, 'attendance');
-        if (!hasAccess) return;
-
         const { start_date, end_date, employee_id } = req.query;
         const query = {};
 
-        if (employee_id) {
-            const ok = await ensureEmployeeInScope(req, res, employee_id);
-            if (!ok) return;
-            query.employee_id = employee_id;
-        }
-        if (!employee_id && req.user.role === 'employee') {
+        // Si es empleado normal, solo puede ver su propio historial
+        if (req.user.role === 'employee') {
+            if (!req.user.employee_id) {
+                return res.status(403).json({ error: 'Usuario no vinculado a un empleado' });
+            }
             query.employee_id = req.user.employee_id;
-        }
+        } else {
+            // Admin o store_coordinator necesitan pasar el check de acceso
+            const hasAccess = await requireFeatureAccess(req, res, 'attendance');
+            if (!hasAccess) return;
 
-        if (isStoreCoordinator(req.user) && !employee_id) {
-            const ids = await getStoreEmployeeIds();
-            query.employee_id = { $in: ids };
+            if (employee_id) {
+                const ok = await ensureEmployeeInScope(req, res, employee_id);
+                if (!ok) return;
+                query.employee_id = employee_id;
+            }
+
+            if (isStoreCoordinator(req.user) && !employee_id) {
+                const ids = await getStoreEmployeeIds();
+                query.employee_id = { $in: ids };
+            }
         }
 
         if (start_date || end_date) {

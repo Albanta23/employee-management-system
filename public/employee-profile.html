@@ -82,10 +82,19 @@
 
         .info-row {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
+            gap: 0.5rem;
             padding: 1rem 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        @media (min-width: 500px) {
+            .info-row {
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+                gap: 1rem;
+            }
         }
 
         .info-row:last-child {
@@ -95,23 +104,32 @@
         .info-label {
             color: var(--text-muted);
             font-size: 0.9rem;
+            flex-shrink: 0;
         }
 
         .info-value {
             font-weight: 500;
-            text-align: right;
+            word-break: break-word;
+            overflow-wrap: break-word;
+        }
+
+        @media (min-width: 500px) {
+            .info-value {
+                text-align: right;
+            }
         }
 
         .info-value input {
             background: transparent;
             border: 1px solid transparent;
             color: var(--text-primary);
-            text-align: right;
             padding: 0.25rem 0.5rem;
             border-radius: 4px;
             font-family: inherit;
             font-size: inherit;
-            width: 200px;
+            width: 100%;
+            max-width: none;
+            text-align: left;
         }
 
         .info-value input:focus {
@@ -206,8 +224,8 @@
         // Cargar datos
         async function loadProfile() {
             try {
-                // Obtener datos frescos del servidor
-                const employeeData = await employeesAPI.getById(user.employee_id);
+                // Usar la ruta /me que permite a empleados acceder a su propio perfil
+                const employeeData = await employeesAPI.getMe();
                 if (!employeeData) throw new Error('No se pudo cargar el perfil');
 
                 document.getElementById('display-name').textContent = employeeData.full_name;
@@ -215,8 +233,8 @@
                 document.getElementById('display-dni').textContent = employeeData.dni;
                 document.getElementById('display-location').textContent = employeeData.location || '-';
 
-                document.getElementById('email').value = employeeData.email;
-                document.getElementById('phone').value = employeeData.phone;
+                document.getElementById('email').value = employeeData.email || '';
+                document.getElementById('phone').value = employeeData.phone || '';
 
                 // Cargar avatar local
                 loadLocalAvatar(employeeData.full_name);

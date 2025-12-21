@@ -145,14 +145,36 @@ router.get('/stats', async (req, res) => {
     }
 });
 
+// Obtener perfil del empleado autenticado (para portal del empleado)
+router.get('/me', async (req, res) => {
+    try {
+        // Cualquier usuario autenticado con employee_id puede ver su propio perfil
+        if (!req.user || !req.user.employee_id) {
+            return res.status(403).json({ error: 'No tienes un perfil de empleado asociado' });
+        }
+
+        const employee = await Employee.findById(req.user.employee_id).lean();
+        if (!employee) return res.status(404).json({ error: 'Perfil de empleado no encontrado' });
+        res.json({ ...employee, id: employee._id.toString(), _id: employee._id.toString() });
+    } catch (error) {
+        console.error('Error al obtener perfil:', error);
+        res.status(500).json({ error: 'Error al obtener perfil' });
+    }
+});
+
 // Obtener un trabajador por ID
 router.get('/:id', async (req, res) => {
     try {
-        const hasAccess = await requireFeatureAccess(req, res, 'employees');
-        if (!hasAccess) return;
+        // Permitir que un empleado acceda a su propio perfil
+        const isOwnProfile = req.user && req.user.employee_id && req.user.employee_id === req.params.id;
+        
+        if (!isOwnProfile) {
+            const hasAccess = await requireFeatureAccess(req, res, 'employees');
+            if (!hasAccess) return;
 
-        const inScope = await ensureEmployeeInScope(req, res, req.params.id);
-        if (!inScope) return;
+            const inScope = await ensureEmployeeInScope(req, res, req.params.id);
+            if (!inScope) return;
+        }
 
         const employee = await Employee.findById(req.params.id).lean();
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
@@ -233,6 +255,22 @@ router.post('/', async (req, res) => {
 // Actualizar trabajador
 router.put('/:id', async (req, res) => {
     try {
+        // Permitir que un empleado actualice su propio perfil (solo email y teléfono)
+        const isOwnProfile = req.user && req.user.employee_id && req.user.employee_id === req.params.id;
+        
+        if (isOwnProfile) {
+            // Empleado solo puede actualizar email y teléfono de su propio perfil
+            const { email, phone } = req.body;
+            const update = {};
+            if (email !== undefined) update.email = email;
+            if (phone !== undefined) update.phone = phone;
+            
+            const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true });
+            if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
+            
+            return res.json({ message: 'Perfil actualizado correctamente' });
+        }
+
         const hasAccess = await requireFeatureAccess(req, res, 'employees');
         if (!hasAccess) return;
 
