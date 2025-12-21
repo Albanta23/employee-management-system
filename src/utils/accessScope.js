@@ -88,7 +88,7 @@ async function requireFeatureAccess(req, res, featureKey) {
         return false;
     }
 
-    const featuresRequiringScope = new Set(['employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports']);
+    const featuresRequiringScope = new Set(['employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports', 'locations']);
     if (featuresRequiringScope.has(featureKey)) {
         const storeLocations = await getStoreLocations();
         if (storeLocations.length === 0) {

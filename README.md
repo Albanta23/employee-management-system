@@ -35,9 +35,11 @@ Aplicación web full-stack para la gestión integral de empleados, incluyendo co
 - ✅ Gestión de empleados (CRUD completo)
 - ✅ Control de vacaciones (solicitudes, aprobaciones)
 - ✅ Registro de bajas médicas
+- ✅ **Gestión de ubicaciones y calendarios laborales** 📍
 - ✅ Historial laboral (altas, bajas, cambios)
 - ✅ Estadísticas y reportes
 - ✅ Sistema de backup y restauración
+- ✅ Control de acceso por roles (Admin, Coordinador, Empleado)
 
 ## 🚀 Instalación Rápida
 
@@ -101,6 +103,16 @@ El servidor se iniciará en **http://localhost:3000**
 - Registrar bajas (médicas, maternidad, paternidad, accidente)
 - Seguimiento de bajas activas
 - Cerrar bajas completadas
+
+### Gestión de Ubicaciones 📍 (NUEVO)
+
+- Organizar tiendas por ubicaciones geográficas
+- Calendario laboral po     # Iniciar servidor
+npm run import-data         # Importar datos desde Excel
+npm run change-password     # Cambiar contraseña admin
+npm run backup              # Crear backup de BD
+npm run restore             # Restaurar desde backup
+node scripts/seed-locations.js  # Crear ubicaciones de ejemplo_GUIDE.md](./LOCATIONS_GUIDE.md)
 
 ## 🛠️ Scripts Disponibles
 

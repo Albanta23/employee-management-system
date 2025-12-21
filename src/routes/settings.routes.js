@@ -226,7 +226,7 @@ router.put('/store-coordinator', authenticateToken, isAdmin, async (req, res) =>
 
         // Persist access map (only known keys)
         if (access && typeof access === 'object') {
-            const allowedKeys = ['dashboard', 'employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports'];
+            const allowedKeys = ['dashboard', 'employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports', 'locations'];
             for (const key of allowedKeys) {
                 if (Object.prototype.hasOwnProperty.call(access, key)) {
                     settings.store_coordinator_access[key] = !!access[key];

@@ -43,7 +43,8 @@ const settingsSchema = new mongoose.Schema({
         vacations: { type: Boolean, default: true },
         absences: { type: Boolean, default: true },
         permissions: { type: Boolean, default: true },
-        reports: { type: Boolean, default: true }
+        reports: { type: Boolean, default: true },
+        locations: { type: Boolean, default: true }
     },
 
     updated_at: {

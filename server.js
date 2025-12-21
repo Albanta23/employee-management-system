@@ -60,6 +60,7 @@ app.use('/api/absences', absencesRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/holidays', holidaysRoutes);
 app.use('/api/settings', require('./src/routes/settings.routes'));
+app.use('/api/locations', require('./src/routes/locations.routes'));
 
 // Global Error Handler
 app.use((err, req, res, next) => {
