@@ -99,7 +99,12 @@
             <form id="vacationForm">
                 <div class="form-group">
                     <label class="form-label">Empleado *</label>
-                    <select id="employee_id" class="form-select" required></select>
+                    <select id="employee_id" class="form-select" required onchange="updateEmployeeBalance()"></select>
+                </div>
+                <div class="form-group" style="margin-top: -0.5rem;">
+                    <div id="employeeBalanceHint" style="font-size: 0.8125rem; color: var(--text-muted);">
+                        Saldo: cargando...
+                    </div>
                 </div>
                 <div class="grid grid-cols-2">
                     <div class="form-group">
@@ -130,6 +135,7 @@
     </div>
 
     <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
     <script src="js/reports.js"></script>
@@ -137,6 +143,7 @@
         if (!isAuthenticated()) window.location.href = 'index.html';
 
         let currentVacations = [];
+        let currentBalanceEmployeeId = null;
 
         async function loadVacations() {
             const vacations = await vacationsAPI.getAll({ type: 'vacation' });
@@ -232,6 +239,31 @@
                 select.innerHTML = employees.employees.map(e => `<option value="${e._id}">${e.full_name}</option>`).join('');
             }
             document.getElementById('vacationModal').classList.add('active');
+            updateEmployeeBalance();
+        }
+
+        async function updateEmployeeBalance() {
+            const employeeId = document.getElementById('employee_id')?.value;
+            const hint = document.getElementById('employeeBalanceHint');
+            if (!employeeId || !hint) return;
+
+            if (currentBalanceEmployeeId !== employeeId) {
+                hint.textContent = 'Saldo: cargando...';
+                currentBalanceEmployeeId = employeeId;
+            }
+
+            const year = new Date().getFullYear();
+            const balance = await vacationsAPI.getBalance({ employee_id: employeeId, year });
+            if (!balance || !balance.vacation) {
+                hint.textContent = 'Saldo: no disponible';
+                return;
+            }
+
+            const a = balance.vacation.allowance_days ?? '-';
+            const used = balance.vacation.approved_days ?? 0;
+            const pending = balance.vacation.pending_days ?? 0;
+            const remaining = balance.vacation.remaining_after_approved ?? 0;
+            hint.textContent = `Saldo ${year}: Asignadas ${a} · Disfrutadas ${used} · Pendientes ${pending} · Disponibles ${remaining}`;
         }
 
         function closeModal() {

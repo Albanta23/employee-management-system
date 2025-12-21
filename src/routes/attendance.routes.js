@@ -3,12 +3,15 @@ const router = express.Router();
 const Attendance = require('../models/Attendance');
 const Employee = require('../models/Employee');
 const { authenticateToken } = require('../middleware/auth');
+const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds } = require('../utils/accessScope');
 
 router.use(authenticateToken);
 
 // Registrar entrada/salida/descanso
 router.post('/register', async (req, res) => {
     try {
+        // El registro propio es parte del portal empleado, no del coordinador.
+        // Permitimos para cualquier usuario vinculado a employee_id.
         const { type, latitude, longitude, device_info, notes } = req.body;
         const employee_id = req.user.employee_id;
 
@@ -62,12 +65,24 @@ router.get('/status', async (req, res) => {
 // Obtener reporte de asistencia
 router.get('/report', async (req, res) => {
     try {
+        const hasAccess = await requireFeatureAccess(req, res, 'attendance');
+        if (!hasAccess) return;
+
         const { start_date, end_date, employee_id } = req.query;
         const query = {};
 
-        if (employee_id) query.employee_id = employee_id;
+        if (employee_id) {
+            const ok = await ensureEmployeeInScope(req, res, employee_id);
+            if (!ok) return;
+            query.employee_id = employee_id;
+        }
         if (!employee_id && req.user.role === 'employee') {
             query.employee_id = req.user.employee_id;
+        }
+
+        if (isStoreCoordinator(req.user) && !employee_id) {
+            const ids = await getStoreEmployeeIds();
+            query.employee_id = { $in: ids };
         }
 
         if (start_date || end_date) {

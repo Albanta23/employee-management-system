@@ -8,6 +8,7 @@ const EmployeeSchema = new mongoose.Schema({
     position: { type: String, required: true },
     location: { type: String, required: true },
     convention: { type: String },
+    annual_vacation_days: { type: Number, default: 30 },
     status: { type: String, enum: ['active', 'inactive', 'on_leave'], default: 'active' },
     hire_date: { type: Date },
     termination_date: { type: Date },

@@ -16,9 +16,9 @@
       justify-content: center;
       min-height: 100vh;
       background: linear-gradient(135deg,
-          #0f172a 0%,
-          #1e293b 50%,
-          #0f172a 100%);
+          var(--bg-dark) 0%,
+          var(--bg-sidebar) 50%,
+          var(--bg-dark) 100%);
       position: relative;
       overflow: hidden;
     }
@@ -71,7 +71,7 @@
     }
 
     .login-card {
-      background: rgba(30, 41, 59, 0.8);
+      background: var(--bg-card);
       backdrop-filter: blur(20px);
       border-radius: var(--radius-xl);
       padding: 3rem 2.5rem;
@@ -151,6 +151,7 @@
       color: var(--text-muted);
       font-size: 0.8125rem;
     }
+
   </style>
 </head>
 
@@ -190,6 +191,7 @@
   </div>
 
   <script src="js/api.js"></script>
+  <script src="js/branding.js"></script>
   <script>
     document
       .getElementById("loginForm")

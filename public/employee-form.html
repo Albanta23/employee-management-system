@@ -94,6 +94,10 @@
                             <option value="Comercio Alimentación Salamanca">Comercio Alimentación (Salamanca)</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label" for="annual_vacation_days">Días de vacaciones/año *</label>
+                        <input type="number" id="annual_vacation_days" class="form-control" min="0" step="0.5" value="30" required>
+                    </div>
                 </div>
 
                 <div class="card"
@@ -132,6 +136,7 @@
     </main>
 
     <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
     <script>
         if (!isAuthenticated()) window.location.href = 'index.html';
 
@@ -158,6 +163,7 @@
                     document.getElementById('salary').value = employee.salary || '';
                     document.getElementById('notes').value = employee.notes || '';
                     document.getElementById('convention').value = employee.convention || '';
+                    document.getElementById('annual_vacation_days').value = (employee.annual_vacation_days ?? 30);
 
                     // Formatear fecha para el input (YYYY-MM-DD)
                     if (employee.hire_date) {
@@ -207,6 +213,7 @@
                 hire_date: document.getElementById('hire_date').value || null,
                 notes: document.getElementById('notes').value || null,
                 convention: document.getElementById('convention').value || null,
+                annual_vacation_days: document.getElementById('annual_vacation_days').value,
                 enableAccess: document.getElementById('enableAccess').checked,
                 username: document.getElementById('username').value || null,
                 password: document.getElementById('password').value || null,

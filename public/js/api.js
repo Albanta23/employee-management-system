@@ -35,7 +35,9 @@ function getAuthHeaders() {
 
 // Manejo de errores de autenticación
 function handleAuthError(response) {
-    if (response.status === 401 || response.status === 403) {
+    // 401 => token inválido/expirado (cerrar sesión)
+    // 403 => permisos insuficientes (no cerrar sesión: puede ser un rol limitado como coordinador)
+    if (response.status === 401) {
         logout();
         return true;
     }
@@ -48,18 +50,51 @@ async function callAPI(url, options = {}) {
         headers: getAuthHeaders()
     };
 
-    const response = await fetch(url, { ...defaultOptions, ...options });
+    let response;
+    try {
+        response = await fetch(url, { ...defaultOptions, ...options });
+    } catch (err) {
+        // Error de red (servidor caído, conexión rechazada, CORS, etc.)
+        const msg = err && err.message ? err.message : 'Error de red: no se pudo conectar con el servidor';
+        showAlert(`No se pudo conectar con el servidor. ${msg}`, 'error');
+        return null;
+    }
 
     if (handleAuthError(response)) return null;
 
     if (response.status === 204) return true;
 
-    const data = await response.json();
+    // Algunas respuestas (404/500) pueden venir como HTML/texto (p.ej. proxy, error page).
+    // Intentamos JSON primero y, si falla, mostramos un mensaje legible.
+    let data = null;
+    let rawText = '';
+    const contentType = response.headers.get('content-type') || '';
+
+    try {
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            rawText = await response.text();
+        }
+    } catch (e) {
+        try {
+            rawText = await response.text();
+        } catch (_) {
+            rawText = '';
+        }
+    }
+
     if (!response.ok) {
-        showAlert(data.error || 'Error en la petición', 'error');
+        const message = (data && data.error)
+            ? data.error
+            : rawText
+                ? `Error ${response.status}: ${rawText.slice(0, 120)}`
+                : `Error ${response.status} en la petición`;
+        showAlert(message, 'error');
         return null;
     }
-    return data;
+
+    return data ?? (rawText ? { text: rawText } : null);
 }
 
 const authAPI = {
@@ -104,6 +139,14 @@ const vacationsAPI = {
     getAll: (params = {}) => {
         const query = new URLSearchParams(params).toString();
         return callAPI(`${API_URL}/vacations${query ? '?' + query : ''}`);
+    },
+    getBalance: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/vacations/balance${query ? '?' + query : ''}`);
+    },
+    getBalances: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/vacations/balances${query ? '?' + query : ''}`);
     },
     getCalendar: (params = {}) => {
         const query = new URLSearchParams(params).toString();
@@ -170,7 +213,13 @@ const attendanceAPI = {
 // Configuración API
 const settingsAPI = {
     get: () => callAPI(`${API_URL}/settings`),
+    getAdmin: () => callAPI(`${API_URL}/settings/admin`),
+    getAccess: () => callAPI(`${API_URL}/settings/access`),
     update: (data) => callAPI(`${API_URL}/settings`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    updateStoreCoordinator: (data) => callAPI(`${API_URL}/settings/store-coordinator`, {
         method: 'PUT',
         body: JSON.stringify(data)
     }),
@@ -179,6 +228,81 @@ const settingsAPI = {
         body: JSON.stringify(data)
     })
 };
+
+// Guard + menú para rol store_coordinator
+(function enforceStoreCoordinatorUI() {
+    async function run() {
+        const user = getUser();
+        if (!user || user.role !== 'store_coordinator') return;
+
+        // Ocultar siempre Configuración
+        const settingsLink = document.querySelector('.sidebar a[href="settings.html"]');
+        if (settingsLink) {
+            const li = settingsLink.closest('li');
+            if (li) li.style.display = 'none';
+        }
+
+        const accessData = await settingsAPI.getAccess();
+        if (!accessData || accessData.role !== 'store_coordinator') return;
+
+        if (!accessData.enabled) {
+            showAlert('El perfil de Coordinador está desactivado', 'warning');
+        }
+
+        const access = accessData.access || {};
+
+        const featureToHref = {
+            dashboard: 'dashboard.html',
+            employees: 'employees.html',
+            attendance: 'attendance-admin.html',
+            vacations: 'vacations.html',
+            absences: 'absences.html',
+            permissions: 'permissions.html'
+        };
+
+        for (const [feature, href] of Object.entries(featureToHref)) {
+            if (access[feature] === false) {
+                const link = document.querySelector(`.sidebar a[href="${href}"]`);
+                if (link) {
+                    const li = link.closest('li');
+                    if (li) li.style.display = 'none';
+                }
+            }
+        }
+
+        // Redirección si entra a una página no permitida
+        const currentPage = (window.location.pathname.split('/').pop() || '').toLowerCase();
+        const pageToFeature = {
+            'dashboard.html': 'dashboard',
+            'employees.html': 'employees',
+            'employee-form.html': 'employees',
+            'employee-profile.html': 'employees',
+            'vacations.html': 'vacations',
+            'absences.html': 'absences',
+            'permissions.html': 'permissions',
+            'attendance-admin.html': 'attendance',
+            'employee-reports.html': 'reports',
+            'settings.html': 'settings'
+        };
+
+        const feature = pageToFeature[currentPage];
+        if (feature === 'settings') {
+            showAlert('No tienes acceso a Configuración', 'warning');
+            window.location.href = 'dashboard.html';
+            return;
+        }
+
+        if (feature && access[feature] === false) {
+            showAlert('No tienes acceso a esta sección', 'warning');
+            window.location.href = 'dashboard.html';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Fire & forget
+        run().catch(() => { /* no-op */ });
+    });
+})();
 
 // Utilidades
 function showAlert(message, type = 'info') {
@@ -211,3 +335,37 @@ function formatPhone(phone) {
     if (!phone) return '-';
     return phone.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
 }
+
+// Marca de agua global (no interactiva)
+(function ensureGlobalWatermark() {
+    const WATERMARK_TEXT = 'By JCF2025DV';
+
+    function positionWatermark(watermarkEl) {
+        const bottomNav = document.querySelector('.bottom-nav');
+        if (bottomNav) {
+            const navHeight = bottomNav.getBoundingClientRect().height || 0;
+            const extra = 12;
+            watermarkEl.style.bottom = `calc(${Math.ceil(navHeight + extra)}px + env(safe-area-inset-bottom, 0px))`;
+        } else {
+            watermarkEl.style.bottom = 'calc(var(--spacing-lg) + env(safe-area-inset-bottom, 0px))';
+        }
+    }
+
+    function addWatermark() {
+        if (document.querySelector('.app-watermark')) return;
+
+        const el = document.createElement('div');
+        el.className = 'app-watermark';
+        el.textContent = WATERMARK_TEXT;
+        document.body.appendChild(el);
+
+        positionWatermark(el);
+        window.addEventListener('resize', () => positionWatermark(el));
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', addWatermark);
+    } else {
+        addWatermark();
+    }
+})();

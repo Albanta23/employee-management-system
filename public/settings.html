@@ -152,13 +152,82 @@
                 <button onclick="updateAdminCredentials()" class="btn btn-secondary"
                     style="border-color: var(--warning); color: var(--warning);">🔐 Actualizar Credenciales</button>
             </div>
+
+            <!-- Coordinador de Tiendas -->
+            <div class="settings-section">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🧑‍💼 Coordinador de Tiendas</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                    Este perfil tiene acceso similar al administrador, pero únicamente a empleados de tienda y sus datos.
+                    El alcance (qué se considera tienda) y las secciones visibles se configuran aquí.
+                </p>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label class="form-label" style="display:flex; align-items:center; gap: .5rem;">
+                        <input type="checkbox" id="coordinatorEnabled" style="transform: scale(1.1);">
+                        Activar perfil de Coordinador de Tiendas
+                    </label>
+                </div>
+
+                <div class="grid grid-cols-2">
+                    <div class="form-group">
+                        <label class="form-label">Usuario Coordinador</label>
+                        <input type="text" id="coordinatorUsername" class="form-control" placeholder="usuario.coordinador">
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">Si lo cambias, se actualizará la cuenta del coordinador.</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contraseña Coordinador</label>
+                        <input type="password" id="coordinatorPassword" class="form-control" placeholder="(dejar en blanco para no cambiar)">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Ubicaciones consideradas TIENDA</label>
+                    <textarea id="storeLocations" class="form-control" rows="5" placeholder="(Opcional) Una ubicación por línea. Si se deja vacío: TIENDA = todo lo que NO sea FÁBRICA."></textarea>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">
+                        Si completas esta lista, el coordinador solo verá esas ubicaciones. Si la dejas vacía, el sistema considerará FÁBRICA toda ubicación cuyo texto contenga “fabrica/fábrica”, y TIENDA el resto.
+                    </p>
+                </div>
+
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label class="form-label">Secciones a las que tendrá acceso</label>
+                    <div class="grid grid-cols-2" style="gap: .75rem;">
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessEmployees" checked> Trabajadores
+                        </label>
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessAttendance" checked> Control Horario
+                        </label>
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessVacations" checked> Vacaciones
+                        </label>
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessAbsences" checked> Bajas Médicas
+                        </label>
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessPermissions" checked> Ausencias y Permisos
+                        </label>
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0; font-weight: 500;">
+                            <input type="checkbox" id="accessReports" checked> Reportes
+                        </label>
+                    </div>
+                </div>
+
+                <button onclick="saveCoordinatorSettings()" class="btn btn-primary" style="margin-top: 1rem;">💾 Guardar Configuración del Coordinador</button>
+            </div>
         </div>
     </main>
 
     <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
     <script>
         if (!isAuthenticated()) {
             window.location.href = 'index.html';
+        }
+
+        const currentUser = getUser();
+        if (!currentUser || currentUser.role !== 'admin') {
+            // Configuración solo para admins
+            window.location.href = 'dashboard.html';
         }
 
         // Fallback para evitar problemas de caché con api.js
@@ -166,6 +235,11 @@
             console.warn('settingsAPI no encontrado en api.js (caché?), definiendo localmente...');
             window.settingsAPI = {
                 get: () => callAPI(`${API_URL}/settings`),
+                getAdmin: () => callAPI(`${API_URL}/settings/admin`),
+                updateStoreCoordinator: (data) => callAPI(`${API_URL}/settings/store-coordinator`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                }),
                 update: (data) => callAPI(`${API_URL}/settings`, {
                     method: 'PUT',
                     body: JSON.stringify(data)
@@ -178,6 +252,7 @@
         }
 
         let currentLogoBase64 = '';
+        let coordinatorUserExists = false;
 
         // Cargar configuración al iniciar
         async function loadSettings() {
@@ -193,12 +268,84 @@
                         document.getElementById('logoPreview').innerHTML = `<img src="${settings.logo_base64}" alt="Logo">`;
 
                         // Actualizar logo en la sidebar live
-                        updateSidebarLogo(settings.logo_base64);
+                        if (typeof window.applyCompanyBranding === 'function') {
+                            window.applyCompanyBranding(settings);
+                        } else {
+                            updateSidebarLogo(settings.logo_base64);
+                        }
                     }
                 }
             } catch (error) {
                 console.error('Error cargando configuración:', error);
                 showAlert('Error al cargar la configuración', 'error');
+            }
+        }
+
+        async function loadCoordinatorSettings() {
+            try {
+                const data = await settingsAPI.getAdmin();
+                if (!data || !data.settings) return;
+
+                const s = data.settings;
+
+                document.getElementById('coordinatorEnabled').checked = !!s.store_coordinator_enabled;
+                document.getElementById('storeLocations').value = Array.isArray(s.store_locations) ? s.store_locations.join('\n') : '';
+
+                const access = s.store_coordinator_access || {};
+                document.getElementById('accessEmployees').checked = access.employees !== false;
+                document.getElementById('accessAttendance').checked = access.attendance !== false;
+                document.getElementById('accessVacations').checked = access.vacations !== false;
+                document.getElementById('accessAbsences').checked = access.absences !== false;
+                document.getElementById('accessPermissions').checked = access.permissions !== false;
+                document.getElementById('accessReports').checked = access.reports !== false;
+
+                const u = data.store_coordinator_user;
+                document.getElementById('coordinatorUsername').value = u?.username || '';
+                document.getElementById('coordinatorPassword').value = '';
+                coordinatorUserExists = !!(u && u.username);
+            } catch (error) {
+                console.error('Error cargando coordinador:', error);
+                showAlert('Error al cargar el perfil de Coordinador', 'error');
+            }
+        }
+
+        async function saveCoordinatorSettings() {
+            const enabled = document.getElementById('coordinatorEnabled').checked;
+            const username = document.getElementById('coordinatorUsername').value.trim();
+            const password = document.getElementById('coordinatorPassword').value;
+            const storeLocations = document.getElementById('storeLocations').value;
+
+            if (enabled && !username) {
+                showAlert('Introduce un usuario para activar el Coordinador', 'warning');
+                return;
+            }
+
+            if (enabled && !coordinatorUserExists && !password) {
+                showAlert('Introduce una contraseña para crear el Coordinador por primera vez', 'warning');
+                return;
+            }
+
+            const payload = {
+                enabled,
+                username: username || undefined,
+                password: password || undefined,
+                store_locations: storeLocations,
+                access: {
+                    // dashboard se deja por defecto true en backend
+                    employees: document.getElementById('accessEmployees').checked,
+                    attendance: document.getElementById('accessAttendance').checked,
+                    vacations: document.getElementById('accessVacations').checked,
+                    absences: document.getElementById('accessAbsences').checked,
+                    permissions: document.getElementById('accessPermissions').checked,
+                    reports: document.getElementById('accessReports').checked
+                }
+            };
+
+            const result = await settingsAPI.updateStoreCoordinator(payload);
+            if (result) {
+                showAlert('Configuración del Coordinador actualizada correctamente', 'success');
+                document.getElementById('coordinatorPassword').value = '';
+                await loadCoordinatorSettings();
             }
         }
 
@@ -217,6 +364,7 @@
         // Actualizar logo en sidebar
         function updateSidebarLogo(src) {
             const logoContainer = document.querySelector('.sidebar-logo');
+            if (!logoContainer) return;
             // Reemplazar icono por imagen pequeña
             logoContainer.innerHTML = `
                 <img src="${src}" style="height: 30px; width: auto; max-width: 30px; object-fit: contain;">
@@ -236,7 +384,13 @@
             const result = await settingsAPI.update(data);
             if (result) {
                 showAlert('Datos de empresa actualizados correctamente', 'success');
-                if (data.logo_base64) updateSidebarLogo(data.logo_base64);
+                if (data.logo_base64) {
+                    if (typeof window.applyCompanyBranding === 'function') {
+                        window.applyCompanyBranding(result);
+                    } else {
+                        updateSidebarLogo(data.logo_base64);
+                    }
+                }
             }
         }
 
@@ -265,6 +419,7 @@
         }
 
         loadSettings();
+        loadCoordinatorSettings();
     </script>
 </body>
 

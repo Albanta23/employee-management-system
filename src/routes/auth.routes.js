@@ -5,6 +5,19 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 require('dotenv').config();
 
+function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            const err = new Error(`Timeout (${ms}ms)${label ? `: ${label}` : ''}`);
+            err.code = 'ETIMEDOUT';
+            reject(err);
+        }, ms);
+    });
+
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Middleware para verificar el token de cambio de contraseña
 const verifyChangeToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -35,7 +48,11 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'DNI y Teléfono/Código requeridos' });
         }
 
-        const user = await User.findOne({ username });
+        const user = await withTimeout(
+            User.findOne({ username }).maxTimeMS(5000),
+            5500,
+            'User.findOne (login)'
+        );
 
         if (!user) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -88,6 +105,9 @@ router.post('/login', async (req, res) => {
 
     } catch (error) {
         console.error('Error en login:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
@@ -104,15 +124,22 @@ router.post('/change-password', verifyChangeToken, async (req, res) => {
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
         const userId = req.user.id;
-        await User.findByIdAndUpdate(userId, {
-            password: hashedPassword,
-            mustChangePassword: false
-        });
+        await withTimeout(
+            User.findByIdAndUpdate(userId, {
+                password: hashedPassword,
+                mustChangePassword: false
+            }).maxTimeMS(5000),
+            5500,
+            'User.findByIdAndUpdate (change-password)'
+        );
 
         res.json({ success: true, message: 'Código de acceso actualizado correctamente. Por favor, inicia sesión de nuevo.' });
 
     } catch (error) {
         console.error('Error en change-password:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
         res.status(500).json({ error: 'Error en el servidor al cambiar la contraseña.' });
     }
 });
@@ -124,9 +151,18 @@ router.post('/change-password', verifyChangeToken, async (req, res) => {
 router.get('/user-access/:employee_id', async (req, res) => {
     try {
         // Este endpoint debería estar protegido también, pero lo dejamos como estaba
-        const user = await User.findOne({ employee_id: req.params.employee_id }).select('username role');
+        const user = await withTimeout(
+            User.findOne({ employee_id: req.params.employee_id })
+                .select('username role')
+                .maxTimeMS(5000),
+            5500,
+            'User.findOne (user-access)'
+        );
         res.json(user || {});
     } catch (error) {
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
         res.status(500).json({ error: 'Error al obtener acceso' });
     }
 });

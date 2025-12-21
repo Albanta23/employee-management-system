@@ -4,6 +4,7 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const bcrypt = require('bcrypt');
+const { requireFeatureAccess, getStoreLocations, getStoreEmployeeIds, ensureEmployeeInScope, isStoreCoordinator } = require('../utils/accessScope');
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
@@ -11,6 +12,9 @@ router.use(authenticateToken);
 // Obtener todos los trabajadores con filtros y paginación
 router.get('/', async (req, res) => {
     try {
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
+
         const { page = 1, limit = 50, search = '', location = '', position = '', status = 'active' } = req.query;
 
         const query = { status };
@@ -26,6 +30,15 @@ router.get('/', async (req, res) => {
 
         if (location) query.location = location;
         if (position) query.position = position;
+
+        if (isStoreCoordinator(req.user)) {
+            const storeLocations = await getStoreLocations();
+            query.location = { $in: storeLocations };
+            // Si además venía un location, lo intersectamos
+            if (location) {
+                query.location = { $in: storeLocations.filter(l => l === String(location)) };
+            }
+        }
 
         const employees = await Employee.find(query)
             .sort({ full_name: 1 })
@@ -61,14 +74,23 @@ router.get('/', async (req, res) => {
 // Obtener estadísticas generales
 router.get('/stats', async (req, res) => {
     try {
+        const hasAccess = await requireFeatureAccess(req, res, 'dashboard');
+        if (!hasAccess) return;
+
         const stats = {};
 
+        const employeeMatch = { status: 'active' };
+        if (isStoreCoordinator(req.user)) {
+            const storeLocations = await getStoreLocations();
+            employeeMatch.location = { $in: storeLocations };
+        }
+
         // Total de empleados activos
-        stats.totalActive = await Employee.countDocuments({ status: 'active' });
+        stats.totalActive = await Employee.countDocuments(employeeMatch);
 
         // Por ubicación
         stats.byLocation = await Employee.aggregate([
-            { $match: { status: 'active' } },
+            { $match: employeeMatch },
             { $group: { _id: '$location', count: { $sum: 1 } } },
             { $project: { location: '$_id', count: 1, _id: 0 } },
             { $sort: { count: -1 } }
@@ -76,7 +98,7 @@ router.get('/stats', async (req, res) => {
 
         // Por puesto
         stats.byPosition = await Employee.aggregate([
-            { $match: { status: 'active' } },
+            { $match: employeeMatch },
             { $group: { _id: '$position', count: { $sum: 1 } } },
             { $project: { position: '$_id', count: 1, _id: 0 } },
             { $sort: { count: -1 } },
@@ -85,14 +107,35 @@ router.get('/stats', async (req, res) => {
 
         // Vacaciones pendientes (Se asume modelo Vacation existe)
         const Vacation = require('../models/Vacation');
-        stats.vacationsPending = await Vacation.countDocuments({ status: 'pending', type: 'vacation' });
+        let storeEmployeeIds = null;
+        if (isStoreCoordinator(req.user)) {
+            storeEmployeeIds = await getStoreEmployeeIds();
+        }
+
+        if (storeEmployeeIds) {
+            stats.vacationsPending = await Vacation.countDocuments({
+                status: 'pending',
+                type: 'vacation',
+                employee_id: { $in: storeEmployeeIds }
+            });
+        } else {
+            stats.vacationsPending = await Vacation.countDocuments({ status: 'pending', type: 'vacation' });
+        }
 
         // Bajas activas
         const Absence = require('../models/Absence');
-        stats.activeAbsences = await Absence.countDocuments({ status: 'active' });
+        if (storeEmployeeIds) {
+            stats.activeAbsences = await Absence.countDocuments({ status: 'active', employee_id: { $in: storeEmployeeIds } });
+        } else {
+            stats.activeAbsences = await Absence.countDocuments({ status: 'active' });
+        }
 
         // Permisos pendientes
-        stats.pendingPermissions = await Vacation.countDocuments({ status: 'pending', type: { $ne: 'vacation' } });
+        if (storeEmployeeIds) {
+            stats.pendingPermissions = await Vacation.countDocuments({ status: 'pending', type: { $ne: 'vacation' }, employee_id: { $in: storeEmployeeIds } });
+        } else {
+            stats.pendingPermissions = await Vacation.countDocuments({ status: 'pending', type: { $ne: 'vacation' } });
+        }
 
         res.json(stats);
 
@@ -105,6 +148,12 @@ router.get('/stats', async (req, res) => {
 // Obtener un trabajador por ID
 router.get('/:id', async (req, res) => {
     try {
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
+
+        const inScope = await ensureEmployeeInScope(req, res, req.params.id);
+        if (!inScope) return;
+
         const employee = await Employee.findById(req.params.id).lean();
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
         res.json({ ...employee, id: employee._id.toString(), _id: employee._id.toString() });
@@ -116,17 +165,43 @@ router.get('/:id', async (req, res) => {
 // Crear nuevo trabajador
 router.post('/', async (req, res) => {
     try {
-        const { full_name, dni, phone, email, position, location, salary, hire_date, notes, convention, enableAccess, username, password } = req.body;
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
+
+        const { full_name, dni, phone, email, position, location, salary, hire_date, notes, convention, annual_vacation_days, enableAccess, username, password } = req.body;
 
         if (!full_name || !dni || !phone || !position || !location) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
         }
 
+        const parsedAnnualVacationDays = annual_vacation_days === undefined || annual_vacation_days === null || annual_vacation_days === ''
+            ? undefined
+            : Number(annual_vacation_days);
+        if (parsedAnnualVacationDays !== undefined && (!Number.isFinite(parsedAnnualVacationDays) || parsedAnnualVacationDays < 0)) {
+            return res.status(400).json({ error: 'annual_vacation_days debe ser un número >= 0' });
+        }
+
         const employee = new Employee({
-            full_name, dni, phone, email, position, location, salary,
+            full_name,
+            dni,
+            phone,
+            email,
+            position,
+            location,
+            salary,
             hire_date: hire_date || new Date(),
-            notes, convention, status: 'active'
+            notes,
+            convention,
+            annual_vacation_days: parsedAnnualVacationDays,
+            status: 'active'
         });
+
+        if (isStoreCoordinator(req.user)) {
+            const storeLocations = await getStoreLocations();
+            if (!storeLocations.includes(String(location))) {
+                return res.status(403).json({ error: 'Solo puedes crear empleados en ubicaciones de tienda configuradas' });
+            }
+        }
 
         await employee.save();
 
@@ -158,11 +233,32 @@ router.post('/', async (req, res) => {
 // Actualizar trabajador
 router.put('/:id', async (req, res) => {
     try {
-        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, enableAccess, username, password } = req.body;
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
 
-        const employee = await Employee.findByIdAndUpdate(req.params.id, {
-            full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date
-        }, { new: true });
+        const inScope = await ensureEmployeeInScope(req, res, req.params.id);
+        if (!inScope) return;
+
+        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, enableAccess, username, password } = req.body;
+
+        const parsedAnnualVacationDays = annual_vacation_days === undefined || annual_vacation_days === null || annual_vacation_days === ''
+            ? undefined
+            : Number(annual_vacation_days);
+        if (parsedAnnualVacationDays !== undefined && (!Number.isFinite(parsedAnnualVacationDays) || parsedAnnualVacationDays < 0)) {
+            return res.status(400).json({ error: 'annual_vacation_days debe ser un número >= 0' });
+        }
+
+        if (isStoreCoordinator(req.user) && location) {
+            const storeLocations = await getStoreLocations();
+            if (!storeLocations.includes(String(location))) {
+                return res.status(403).json({ error: 'No puedes mover un empleado fuera de las tiendas configuradas' });
+            }
+        }
+
+        const update = { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date };
+        if (parsedAnnualVacationDays !== undefined) update.annual_vacation_days = parsedAnnualVacationDays;
+
+        const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true });
 
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
 
@@ -188,6 +284,12 @@ router.put('/:id', async (req, res) => {
 // Eliminar trabajador (baja definitiva)
 router.delete('/:id', async (req, res) => {
     try {
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
+
+        const inScope = await ensureEmployeeInScope(req, res, req.params.id);
+        if (!inScope) return;
+
         const employee = await Employee.findByIdAndUpdate(req.params.id, {
             status: 'inactive',
             termination_date: new Date()
