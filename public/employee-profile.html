@@ -75,26 +75,16 @@
         .info-group {
             background: rgba(30, 41, 59, 0.5);
             border-radius: var(--radius-lg);
-            padding: 1.5rem;
+            padding: 1rem;
             border: 1px solid rgba(255, 255, 255, 0.05);
             margin-bottom: 1.5rem;
+            overflow: hidden;
         }
 
         .info-row {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            padding: 1rem 0;
+            display: block;
+            padding: 0.75rem 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        @media (min-width: 500px) {
-            .info-row {
-                flex-direction: row;
-                justify-content: space-between;
-                align-items: center;
-                gap: 1rem;
-            }
         }
 
         .info-row:last-child {
@@ -103,33 +93,37 @@
 
         .info-label {
             color: var(--text-muted);
-            font-size: 0.9rem;
-            flex-shrink: 0;
+            font-size: 0.8rem;
+            display: block;
+            margin-bottom: 0.25rem;
         }
 
         .info-value {
             font-weight: 500;
-            word-break: break-word;
-            overflow-wrap: break-word;
-        }
-
-        @media (min-width: 500px) {
-            .info-value {
-                text-align: right;
-            }
+            word-break: break-all;
+            overflow-wrap: anywhere;
+            display: block;
+            font-size: 0.9rem;
         }
 
         .info-value input {
             background: transparent;
-            border: 1px solid transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
             color: var(--text-primary);
-            padding: 0.25rem 0.5rem;
+            padding: 0.5rem;
             border-radius: 4px;
             font-family: inherit;
-            font-size: inherit;
+            font-size: 0.85rem;
             width: 100%;
-            max-width: none;
-            text-align: left;
+            box-sizing: border-box;
+            word-break: break-all;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 400px) {
+            .info-value input {
+                font-size: 0.8rem;
+            }
         }
 
         .info-value input:focus {
