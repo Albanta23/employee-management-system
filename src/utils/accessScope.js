@@ -7,19 +7,22 @@ const STORE_EMPLOYEE_IDS_CACHE_TTL_MS = 60 * 1000;
 
 const settingsCache = {
     fetchedAt: 0,
-    value: null
+    value: null,
+    pendingPromise: null
 };
 
 const storeLocationsCache = {
     fetchedAt: 0,
     key: '',
-    value: []
+    value: [],
+    pendingPromise: null
 };
 
 const storeEmployeeIdsCache = {
     fetchedAt: 0,
     key: '',
-    value: []
+    value: [],
+    pendingPromise: null
 };
 
 function normalizeLocation(value) {
@@ -42,13 +45,24 @@ async function getSettingsForAccess() {
         return settingsCache.value;
     }
 
-    // Usamos lean() para evitar overhead de documentos Mongoose cuando solo leemos.
-    const settings = await Settings.findOne().lean().maxTimeMS(15000);
-    const value = settings || new Settings().toObject();
+    if (settingsCache.pendingPromise) {
+        return settingsCache.pendingPromise;
+    }
 
-    settingsCache.value = value;
-    settingsCache.fetchedAt = now;
-    return value;
+    settingsCache.pendingPromise = (async () => {
+        // Usamos lean() para evitar overhead de documentos Mongoose cuando solo leemos.
+        const settings = await Settings.findOne().lean().maxTimeMS(15000);
+        const value = settings || new Settings().toObject();
+        settingsCache.value = value;
+        settingsCache.fetchedAt = Date.now();
+        return value;
+    })();
+
+    try {
+        return await settingsCache.pendingPromise;
+    } finally {
+        settingsCache.pendingPromise = null;
+    }
 }
 
 function isStoreCoordinator(user) {
@@ -110,23 +124,34 @@ async function getStoreLocations() {
         return storeLocationsCache.value;
     }
 
-    let result;
-    if (cleanedConfigured.length > 0) {
-        result = Array.from(new Set(cleanedConfigured));
-    } else {
-        // Si el admin no configura lista de tiendas, derivamos: todo lo que NO sea fábrica.
-        const allLocations = await Employee.distinct('location').maxTimeMS(15000);
-        const derived = (allLocations || [])
-            .map(l => (l == null ? '' : String(l)).trim())
-            .filter(Boolean)
-            .filter(l => !isFactoryLocation(l));
-        result = Array.from(new Set(derived));
+    if (storeLocationsCache.pendingPromise && storeLocationsCache.key === key) {
+        return storeLocationsCache.pendingPromise;
     }
 
     storeLocationsCache.key = key;
-    storeLocationsCache.value = result;
-    storeLocationsCache.fetchedAt = now;
-    return result;
+    storeLocationsCache.pendingPromise = (async () => {
+        let result;
+        if (cleanedConfigured.length > 0) {
+            result = Array.from(new Set(cleanedConfigured));
+        } else {
+            // Si el admin no configura lista de tiendas, derivamos: todo lo que NO sea fábrica.
+            const allLocations = await Employee.distinct('location').maxTimeMS(15000);
+            const derived = (allLocations || [])
+                .map(l => (l == null ? '' : String(l)).trim())
+                .filter(Boolean)
+                .filter(l => !isFactoryLocation(l));
+            result = Array.from(new Set(derived));
+        }
+        storeLocationsCache.value = result;
+        storeLocationsCache.fetchedAt = Date.now();
+        return result;
+    })();
+
+    try {
+        return await storeLocationsCache.pendingPromise;
+    } finally {
+        storeLocationsCache.pendingPromise = null;
+    }
 }
 
 async function getStoreEmployeeIds() {
@@ -141,6 +166,10 @@ async function getStoreEmployeeIds() {
         return storeEmployeeIdsCache.value;
     }
 
+    if (storeEmployeeIdsCache.pendingPromise && storeEmployeeIdsCache.key === key) {
+        return storeEmployeeIdsCache.pendingPromise;
+    }
+
     if (storeLocations.length === 0) {
         storeEmployeeIdsCache.key = key;
         storeEmployeeIdsCache.value = [];
@@ -148,19 +177,27 @@ async function getStoreEmployeeIds() {
         return [];
     }
 
-    const employees = await Employee.find({
-        location: { $in: storeLocations },
-        status: { $ne: 'inactive' }
-    })
-        .select('_id')
-        .lean()
-        .maxTimeMS(15000);
-
-    const ids = employees.map(e => String(e._id));
     storeEmployeeIdsCache.key = key;
-    storeEmployeeIdsCache.value = ids;
-    storeEmployeeIdsCache.fetchedAt = now;
-    return ids;
+    storeEmployeeIdsCache.pendingPromise = (async () => {
+        const employees = await Employee.find({
+            location: { $in: storeLocations },
+            status: { $ne: 'inactive' }
+        })
+            .select('_id')
+            .lean()
+            .maxTimeMS(15000);
+
+        const ids = employees.map(e => String(e._id));
+        storeEmployeeIdsCache.value = ids;
+        storeEmployeeIdsCache.fetchedAt = Date.now();
+        return ids;
+    })();
+
+    try {
+        return await storeEmployeeIdsCache.pendingPromise;
+    } finally {
+        storeEmployeeIdsCache.pendingPromise = null;
+    }
 }
 
 async function getAllowedEmployeeIdSetForUser(user) {

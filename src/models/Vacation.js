@@ -12,4 +12,8 @@ const VacationSchema = new mongoose.Schema({
     approved_date: { type: Date }
 }, { timestamps: true });
 
+VacationSchema.index({ employee_id: 1, start_date: 1, end_date: 1 });
+VacationSchema.index({ employee_id: 1, status: 1, type: 1 });
+VacationSchema.index({ status: 1, type: 1 });
+
 module.exports = mongoose.model('Vacation', VacationSchema);

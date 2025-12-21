@@ -11,4 +11,7 @@ const AttendanceSchema = new mongoose.Schema({
     ip_address: { type: String }
 }, { timestamps: true });
 
+AttendanceSchema.index({ employee_id: 1, timestamp: -1 });
+AttendanceSchema.index({ timestamp: -1 });
+
 module.exports = mongoose.model('Attendance', AttendanceSchema);

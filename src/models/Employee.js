@@ -16,4 +16,7 @@ const EmployeeSchema = new mongoose.Schema({
     notes: { type: String }
 }, { timestamps: true });
 
+EmployeeSchema.index({ status: 1, location: 1 });
+EmployeeSchema.index({ location: 1 });
+
 module.exports = mongoose.model('Employee', EmployeeSchema);

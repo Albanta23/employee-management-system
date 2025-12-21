@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Settings = require('../models/Settings');
 const User = require('../models/User');
+const { getSettingsForAccess } = require('../utils/accessScope');
 const bcrypt = require('bcrypt');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 
@@ -105,13 +106,6 @@ router.get('/admin', authenticateToken, isAdmin, async (req, res) => {
 // Get Access Config (AUTH: admin/coordinator)
 router.get('/access', authenticateToken, async (req, res) => {
     try {
-        let settings = await withTimeout(
-            Settings.findOne().maxTimeMS(15000),
-            16000,
-            'Settings.findOne (access)'
-        );
-        if (!settings) settings = new Settings();
-
         if (req.user.role === 'admin') {
             return res.json({
                 role: 'admin',
@@ -130,6 +124,7 @@ router.get('/access', authenticateToken, async (req, res) => {
         }
 
         if (req.user.role === 'store_coordinator') {
+            const settings = await getSettingsForAccess();
             return res.json({
                 role: 'store_coordinator',
                 enabled: !!settings.store_coordinator_enabled,

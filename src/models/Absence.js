@@ -11,4 +11,7 @@ const AbsenceSchema = new mongoose.Schema({
     notes: { type: String }
 }, { timestamps: true });
 
+AbsenceSchema.index({ employee_id: 1, status: 1, start_date: 1 });
+AbsenceSchema.index({ status: 1, start_date: 1 });
+
 module.exports = mongoose.model('Absence', AbsenceSchema);
