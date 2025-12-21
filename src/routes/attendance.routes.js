@@ -68,14 +68,22 @@ router.get('/report', async (req, res) => {
         const { start_date, end_date, employee_id } = req.query;
         const query = {};
 
-        // Si es empleado normal, solo puede ver su propio historial
-        if (req.user.role === 'employee') {
+        console.log('📊 /report - Usuario:', req.user.username, 'Rol:', req.user.role, 'Employee_id:', req.user.employee_id);
+
+        // Si es empleado normal (role=employee), solo puede ver su propio historial
+        // Usuarios sin rol específico o con rol 'admin' pueden ser manejados diferente
+        if (req.user.role === 'employee' || (!req.user.role && req.user.employee_id)) {
             if (!req.user.employee_id) {
                 return res.status(403).json({ error: 'Usuario no vinculado a un empleado' });
             }
             query.employee_id = req.user.employee_id;
+        } else if (req.user.role === 'admin') {
+            // Admin puede ver todo, opcionalmente filtrar por employee_id
+            if (employee_id) {
+                query.employee_id = employee_id;
+            }
         } else {
-            // Admin o store_coordinator necesitan pasar el check de acceso
+            // store_coordinator u otros roles necesitan pasar el check de acceso
             const hasAccess = await requireFeatureAccess(req, res, 'attendance');
             if (!hasAccess) return;
 
