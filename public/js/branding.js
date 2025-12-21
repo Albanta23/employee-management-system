@@ -84,6 +84,51 @@
         const btn = document.createElement('button');
         btn.id = 'theme-toggle';
         btn.type = 'button';
+
+        // Check if we're on employee portal (has bottom-nav)
+        const bottomNav = document.querySelector('.bottom-nav');
+        
+        if (bottomNav) {
+            // Employee portal: integrate into bottom nav
+            btn.className = 'nav-item theme-toggle-nav';
+            btn.style.cssText = `
+                background: transparent;
+                border: none;
+                color: var(--text-muted);
+                text-align: center;
+                text-decoration: none;
+                font-size: 0.75rem;
+                font-weight: 500;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 0.25rem;
+                cursor: pointer;
+                padding: 0;
+                -webkit-tap-highlight-color: transparent;
+            `;
+            
+            const updateContent = () => {
+                const isLight = document.documentElement.classList.contains('theme-light');
+                btn.innerHTML = isLight 
+                    ? '<span style="font-size: 1.75rem; line-height: 1;">🌙</span><small>Oscuro</small>' 
+                    : '<span style="font-size: 1.75rem; line-height: 1;">☀️</span><small>Claro</small>';
+            };
+            
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const isLight = document.documentElement.classList.contains('theme-light');
+                applyTheme(isLight ? THEME_DARK : THEME_LIGHT, { persist: true });
+                updateContent();
+            });
+            
+            updateContent();
+            bottomNav.appendChild(btn);
+            return;
+        }
+
+        // Default button setup for other pages
         btn.className = 'btn btn-secondary theme-toggle';
 
         btn.addEventListener('click', () => {
@@ -103,11 +148,6 @@
             const currentIsLight = document.documentElement.classList.contains('theme-light');
             applyTheme(currentIsLight ? THEME_LIGHT : THEME_DARK, { persist: false });
             return;
-        }
-
-        // On pages with bottom navigation (employee portal), lift the button to avoid overlap.
-        if (document.querySelector('.bottom-nav')) {
-            btn.style.bottom = 'calc(var(--spacing-lg) + 90px + var(--safe-area-inset-bottom, 0px))';
         }
 
         positionThemeToggleButton(btn);
