@@ -15,6 +15,9 @@ const { getSettingsForAccess, getStoreLocations, getStoreEmployeeIds } = require
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Promesa de conexión para Vercel (serverless)
+let dbConnectionPromise = null;
+
 function withTimeout(promise, ms, label) {
     let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
@@ -34,6 +37,20 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Middleware para asegurar conexión a MongoDB en Vercel (serverless)
+app.use('/api', async (req, res, next) => {
+    try {
+        if (!dbConnectionPromise) {
+            dbConnectionPromise = connectDB();
+        }
+        await dbConnectionPromise;
+        next();
+    } catch (error) {
+        console.error('Error conectando a MongoDB:', error);
+        res.status(503).json({ error: 'Error de conexión a la base de datos' });
+    }
+});
 
 // Rutas de la API
 app.use('/api/auth', authRoutes);
@@ -56,16 +73,10 @@ app.get('/', (req, res) => {
 });
 
 // Conectar a MongoDB y arrancar servidor
-// Para Vercel (serverless): solo conectar DB, no app.listen
+// Para Vercel (serverless): la conexión se hace mediante middleware antes de cada request API
 if (process.env.VERCEL) {
-    // En Vercel, conectamos la DB cuando se importa el módulo
-    connectDB()
-        .then(() => {
-            console.log('✅ MongoDB conectado (Vercel serverless)');
-        })
-        .catch(err => {
-            console.error('Error al conectar a MongoDB en Vercel:', err);
-        });
+    // En Vercel serverless no hacemos nada aquí, el middleware /api se encarga
+    console.log('🚀 Modo Vercel serverless activo');
 } else {
     // En servidor tradicional: conectar y luego listen
     connectDB()
