@@ -7,6 +7,10 @@
     <title>Nueva Solicitud - Gestión RH</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/es.js"></script>
     <style>
         body {
             background: #0f172a;
@@ -76,13 +80,18 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-2">
+            <!-- Contenedor del Calendario para Vacaciones -->
+            <div id="calendar-container" style="display: none; margin-bottom: 1.5rem; justify-content: center;">
+                <input type="text" id="range-picker" style="display: none;"> <!-- Flatpickr mount point -->
+            </div>
+
+            <div class="grid grid-cols-2" id="manual-dates">
                 <div class="form-group">
                     <label class="form-label">Fecha Inicio</label>
                     <input type="date" id="start_date" class="form-control" required onchange="updateCalculatedDays()">
                 </div>
                 <div class="form-group" id="end-date-group">
-                    <label class="form-label">Fecha Fin (Opcional)</label>
+                    <label class="form-label">Fecha Fin</label>
                     <input type="date" id="end_date" class="form-control" onchange="updateCalculatedDays()">
                 </div>
             </div>
@@ -125,6 +134,67 @@
 
         const urlParams = new URLSearchParams(window.location.search);
         let currentCategory = urlParams.get('type') || 'vacation';
+        const editId = urlParams.get('edit'); // ID si estamos editando
+        let fpInstance = null;
+
+        if (editId) {
+            document.getElementById('page-title').textContent = 'Modificar Solicitud';
+            loadExistingRequest(editId);
+        }
+
+        async function loadExistingRequest(id) {
+            // Asumimos que es vacación/permiso ya que absencesAPI es diferente y bajas no se suelen editar igual
+            // Si fuera necesaria edición de bajas, habría que distinguir por currentCategory
+            const data = await vacationsAPI.getById(id);
+            if (!data) {
+                showAlert('No se pudo cargar la solicitud', 'error');
+                return;
+            }
+
+            // Rellenar datos básicos
+            document.getElementById('start_date').value = data.start_date.split('T')[0];
+            document.getElementById('end_date').value = data.end_date.split('T')[0];
+            document.getElementById('reason').value = data.reason || '';
+
+            // Tipo y Subtipo
+            setType(data.type === 'vacation' || data.type === 'other' ? data.type : 'permission', null);
+            // Nota: La lógica de setType actual sobrescribe contenidos del select, así que ajustamos el valor DESPUÉS
+            const typeSelect = document.getElementById('type');
+            if (typeSelect && data.type !== 'vacation' && data.type !== 'other') {
+                typeSelect.value = data.type;
+            }
+
+            // Actualizar calendario visualmente si es vacación
+            if (currentCategory === 'vacation' && fpInstance) {
+                fpInstance.setDate([data.start_date.split('T')[0], data.end_date.split('T')[0]]);
+            }
+
+            updateCalculatedDays();
+        }
+
+        function initCalendar() {
+            if (fpInstance) return;
+
+            fpInstance = flatpickr("#range-picker", {
+                mode: "range",
+                inline: true,
+                locale: "es", // Español
+                minDate: "today",
+                dateFormat: "Y-m-d",
+                onChange: function (selectedDates, dateStr, instance) {
+                    if (selectedDates.length === 2) {
+                        const start = instance.formatDate(selectedDates[0], "Y-m-d");
+                        const end = instance.formatDate(selectedDates[1], "Y-m-d");
+
+                        // Sincronizar con inputs ocultos/estándar
+                        document.getElementById('start_date').value = start;
+                        document.getElementById('end_date').value = end;
+
+                        updateCalculatedDays();
+                    }
+                }
+            });
+        }
 
         function setType(cat, el) {
             currentCategory = cat;
@@ -132,14 +202,28 @@
             if (el) el.classList.add('active');
             else document.querySelector(`[data-type="${cat}"]`)?.classList.add('active');
 
-            // Ajustar sub-tipos
+            // Ajustar UI
+            const calendarContainer = document.getElementById('calendar-container');
+            const manualDates = document.getElementById('manual-dates');
             const subtypeGroup = document.getElementById('subtype-group');
             const subtypeSelect = document.getElementById('type');
             const medicalFields = document.getElementById('medical-fields');
 
             medicalFields.style.display = (cat === 'medical') ? 'block' : 'none';
 
+            if (cat === 'vacation') {
+                calendarContainer.style.display = 'flex';
+                manualDates.style.display = 'none';
+                initCalendar();
+                // No limpiamos si estamos en edición
+                if (fpInstance && !editId) fpInstance.clear();
+            } else {
+                calendarContainer.style.display = 'none';
+                manualDates.style.display = 'grid';
+            }
+
             if (cat === 'permission' || cat === 'medical') {
+                // ... (mismo código anterior) ...
                 subtypeGroup.style.display = 'block';
                 subtypeSelect.innerHTML = cat === 'permission'
                     ? `
@@ -165,6 +249,7 @@
         setType(currentCategory, null);
 
         async function updateCalculatedDays() {
+            // ... (resto de la lógica igual, pero asegurando que lee los inputs actualizados)
             if (currentCategory !== 'vacation') {
                 document.getElementById('days-preview').style.display = 'none';
                 return;
@@ -174,6 +259,10 @@
             const endDate = document.getElementById('end_date').value || startDate;
 
             if (startDate) {
+                // Pequeño delay para UX
+                document.getElementById('calculated-days').innerHTML = '<span class="spinner">...</span>';
+                document.getElementById('days-preview').style.display = 'block';
+
                 const res = await holidaysAPI.calculate({
                     start_date: startDate,
                     end_date: endDate,
@@ -181,7 +270,6 @@
                 });
 
                 if (res && typeof res.days === 'number') {
-                    document.getElementById('days-preview').style.display = 'block';
                     document.getElementById('calculated-days').textContent = res.days;
                 }
             }
@@ -193,10 +281,13 @@
             const startDate = document.getElementById('start_date').value;
             const endDate = document.getElementById('end_date').value || startDate;
 
-            // Obtener los días calculados (en el caso de vacaciones, el sistema lo hace auto)
+            if (!startDate) return showAlert('Por favor selecciona una fecha.', 'warning');
+            if (currentCategory === 'vacation' && !endDate) return showAlert('Por favor selecciona el rango completo de vacaciones.', 'warning');
+
+            // Obtener los días calculados
             let days = parseInt(document.getElementById('calculated-days').textContent) || 0;
 
-            // Si es otro tipo de ausencia (permiso/baja), calculamos naturales por defecto
+            // Si es otro tipo, calculamos naturales por defecto si no viniera del backend (aunque holidaysAPI podría usarse para todo)
             if (currentCategory !== 'vacation') {
                 days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24)) + 1;
             }
@@ -215,14 +306,22 @@
 
             let result;
             if (currentCategory === 'medical') {
-                result = await absencesAPI.create(data);
+                if (editId) {
+                    result = await absencesAPI.update(editId, data);
+                } else {
+                    result = await absencesAPI.create(data);
+                }
             } else {
-                result = await vacationsAPI.create(data);
+                if (editId) {
+                    result = await vacationsAPI.update(editId, data);
+                } else {
+                    result = await vacationsAPI.create(data);
+                }
             }
 
             if (result) {
-                showAlert('Solicitud enviada correctamente', 'success');
-                setTimeout(() => window.location.href = 'employee-dashboard.html', 1500);
+                showAlert(editId ? 'Solicitud actualizada correctamente' : 'Solicitud enviada correctamente', 'success');
+                setTimeout(() => window.location.href = 'employee-vacations.html', 1500); // Volver a lista de mis vacas
             }
         });
     </script>

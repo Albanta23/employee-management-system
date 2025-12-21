@@ -79,20 +79,45 @@
                 days[date].push(log);
             });
 
-            container.innerHTML = Object.keys(days).reverse().map(date => {
-                const logs = days[date];
+            const emojis = { in: '📍', out: '🏠', break_start: '☕', break_end: '🔄' };
+            const labels = { in: 'Entrada', out: 'Salida', break_start: 'Inicio Descanso', break_end: 'Fin Descanso' };
+
+            container.innerHTML = Object.keys(days).sort((a, b) => new Date(b) - new Date(a)).map(date => {
+                const logs = days[date].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const dateObj = new Date(date);
+                const dateStr = dateObj.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+                const isToday = new Date().toDateString() === dateObj.toDateString();
+
                 return `
-                    <div class="card" style="margin-bottom: 1rem; padding: 1rem;">
-                        <h4 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
-                            ${new Date(date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}
-                        </h4>
-                        ${logs.map(l => `
-                            <div style="display: flex; justify-content: space-between; font-size: 0.875rem; margin-top: 0.5rem;">
-                                <span>${l.type === 'in' ? '🟢 Entrada' : l.type === 'out' ? '🔴 Salida' : '🟠 Pausa'}</span>
-                                <span style="font-family: monospace;">${new Date(l.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                        `).join('')}
+                <details class="card" ${isToday ? 'open' : ''} style="margin-bottom: 1rem; padding: 0; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); background: rgba(30, 41, 59, 0.5);">
+                    <summary style="padding: 1rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; list-style: none;">
+                        <span style="font-weight: 600; text-transform: capitalize; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                             <span>${dateStr}</span>
+                             ${isToday ? '<span style="font-size: 0.7em; background: var(--primary); padding: 2px 6px; border-radius: 4px; color: white;">HOY</span>' : ''}
+                        </span>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                             <span style="background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 10px; font-size: 0.75rem;">
+                                ${logs.length}
+                             </span>
+                             <span style="font-size: 0.8rem; color: var(--text-muted);">▼</span>
+                        </div>
+                    </summary>
+                    <div style="background: rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.05);">
+                        ${logs.map(log => {
+                    const time = new Date(log.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+                    return `
+                                <div style="display: flex; align-items: center; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.02);">
+                                    <div style="margin-right: 1rem; font-size: 1.25rem;">${emojis[log.type]}</div>
+                                    <div style="flex: 1;">
+                                        <div style="font-size: 0.875rem; font-weight: 500;">${labels[log.type]}</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${log.location || 'Ubicación no disponible'}</div>
+                                    </div>
+                                    <div style="font-family: monospace; font-size: 0.9rem; color: var(--text-secondary);">${time}</div>
+                                </div>
+                            `;
+                }).join('')}
                     </div>
+                </details>
                 `;
             }).join('');
         }
@@ -103,19 +128,28 @@
             }
 
             const monthStr = monthInput.value;
-            const columns = ['Día', 'Hora', 'Tipo', 'Ubicación'];
-            const rows = currentAttendanceData.map(log => [
-                formatDate(log.timestamp),
-                new Date(log.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-                log.type === 'in' ? 'Entrada' : log.type === 'out' ? 'Salida' : 'Pausa',
-                log.location || '-'
-            ]);
 
-            reportsUtil.exportTable(
-                `REGISTRO DE JORNADA - ${monthStr}`,
-                columns,
-                rows,
-                `Fichajes_${user.name.replace(/\s/g, '_')}_${monthStr}`
+            // Agrupar datos para reporte detallado
+            const grouped = {};
+            currentAttendanceData.forEach(log => {
+                const dateKey = new Date(log.timestamp).toLocaleDateString('es-ES');
+                const key = `${dateKey}_${user._id || 'user'}`;
+
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date: dateKey,
+                        employee: user.name,
+                        dni: user.dni || '-',
+                        logs: []
+                    };
+                }
+                grouped[key].logs.push(log);
+            });
+
+            await reportsUtil.exportGroupedAttendancePDF(
+                `REGISTRO DETALLADO DE JORNADA - ${monthStr}`,
+                grouped,
+                `Registro_Jornada_${user.name.replace(/\s/g, '_')}_${monthStr}`
             );
         }
 

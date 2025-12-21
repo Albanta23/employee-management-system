@@ -23,11 +23,10 @@ async function calculateVacationDays(startDate, endDate, location) {
     }).map(h => h.date.toISOString().split('T')[0]);
 
     while (current <= end) {
-        const dayOfWeek = current.getDay(); // 0 = Domingo, 6 = Sábado
         const dateStr = current.toISOString().split('T')[0];
 
-        // Si no es fin de semana (Sábado/Domingo) y no es festivo
-        if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidayStrings.includes(dateStr)) {
+        // Contar todos los días excepto los festivos (Vacaciones Naturales)
+        if (!holidayStrings.includes(dateStr)) {
             count++;
         }
 

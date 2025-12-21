@@ -16,7 +16,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Rutas de la API
@@ -26,6 +27,13 @@ app.use('/api/vacations', vacationsRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/holidays', holidaysRoutes);
+app.use('/api/settings', require('./src/routes/settings.routes'));
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+    console.error('🔥 Global Error:', err);
+    res.status(500).json({ error: 'Error del servidor: ' + err.message });
+});
 
 // Ruta raíz - redirigir al login
 app.get('/', (req, res) => {

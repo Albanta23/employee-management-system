@@ -78,22 +78,35 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Actualizar estado de vacación (Aprobar/Rechazar)
+// Actualizar solicitud de vacación
 router.put('/:id', async (req, res) => {
     try {
-        const { status, reason } = req.body;
+        const { status, reason, start_date, end_date, type, days } = req.body;
+        const update = {};
 
-        const update = { status };
-        if (status === 'approved') {
-            update.approved_by = req.user.id;
-            update.approved_date = new Date();
+        // Si se envía status, es una aprobación/rechazo (normalmente admin)
+        if (status) {
+            update.status = status;
+            if (status === 'approved') {
+                update.approved_by = req.user.id;
+                update.approved_date = new Date();
+            }
         }
-        if (reason) update.reason = reason;
+
+        // Permitir actualizar datos si es pendiente o si se fuerzan los datos
+        const existing = await Vacation.findById(req.params.id);
+        if (!existing) return res.status(404).json({ error: 'Solicitud no encontrada' });
+
+        if (existing.status === 'pending' || req.user.role === 'admin') {
+            if (start_date) update.start_date = start_date;
+            if (end_date) update.end_date = end_date;
+            if (type) update.type = type;
+            if (reason) update.reason = reason;
+            if (days) update.days = days;
+        }
 
         const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
-
-        if (!vacation) return res.status(404).json({ error: 'Solicitud no encontrada' });
-        res.json({ message: 'Solicitud actualizada correctamente' });
+        res.json({ message: 'Solicitud actualizada correctamente', vacation });
 
     } catch (error) {
         console.error('Error al actualizar solicitud:', error);

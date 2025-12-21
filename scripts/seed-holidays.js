@@ -26,6 +26,17 @@ const nationalHolidays = [
     { date: '2025-12-06', name: 'Día de la Constitución Española', type: 'national' },
     { date: '2025-12-08', name: 'Inmaculada Concepción', type: 'national' },
     { date: '2025-12-25', name: 'Natividad del Señor', type: 'national' },
+    // 2026
+    { date: '2026-01-01', name: 'Año Nuevo', type: 'national' },
+    { date: '2026-01-06', name: 'Epifanía del Señor', type: 'national' },
+    { date: '2026-04-03', name: 'Viernes Santo', type: 'national' },
+    { date: '2026-05-01', name: 'Fiesta del Trabajo', type: 'national' },
+    { date: '2026-08-15', name: 'Asunción de la Virgen', type: 'national' },
+    { date: '2026-10-12', name: 'Fiesta Nacional de España', type: 'national' },
+    { date: '2026-11-01', name: 'Todos los Santos', type: 'national' },
+    { date: '2026-12-06', name: 'Día de la Constitución Española', type: 'national' },
+    { date: '2026-12-08', name: 'Inmaculada Concepción', type: 'national' },
+    { date: '2026-12-25', name: 'Natividad del Señor', type: 'national' },
 ];
 
 async function seedHolidays() {

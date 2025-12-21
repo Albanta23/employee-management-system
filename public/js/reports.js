@@ -14,11 +14,30 @@ const reportsUtil = {
     /**
      * Genera un justificante individual profesional
      */
-    generateJustification: async (data, typeTitle) => {
-        if (!window.jspdf) {
-            console.error('jsPDF no cargado');
-            return alert('Error: La librería PDF no está cargada.');
+    // Cargar configuración desde el servidor si es posible
+    loadConfig: async () => {
+        if (typeof settingsAPI !== 'undefined') {
+            try {
+                const settings = await settingsAPI.get();
+                if (settings) {
+                    if (settings.company_name) reportsUtil.config.companyName = settings.company_name;
+                    if (settings.logo_base64) reportsUtil.config.logoBase64 = settings.logo_base64;
+                    if (settings.company_address) reportsUtil.config.companyAddress = settings.company_address;
+                    if (settings.company_cif) reportsUtil.config.companyCif = settings.company_cif;
+                }
+            } catch (e) {
+                console.warn('No se pudo cargar la configuración personalizada', e);
+            }
         }
+    },
+
+    /**
+     * Genera un justificante individual profesional
+     */
+    generateJustification: async (data, typeTitle) => {
+        if (!window.jspdf) return alert('Error: La librería PDF no está cargada.');
+
+        await reportsUtil.loadConfig();
 
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF();
@@ -28,6 +47,13 @@ const reportsUtil = {
         doc.setFillColor(...config.secondaryColor);
         doc.rect(0, 0, 210, 40, 'F');
 
+        // Logo si existe
+        if (config.logoBase64) {
+            try {
+                doc.addImage(config.logoBase64, 'PNG', 10, 5, 30, 30, undefined, 'FAST');
+            } catch (e) { console.warn('Error añadiendo logo', e); }
+        }
+
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(22);
         doc.setFont('helvetica', 'bold');
@@ -35,7 +61,7 @@ const reportsUtil = {
 
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        doc.text(config.companyName, 105, 30, { align: 'center' });
+        doc.text(config.companyName || 'SISTEMA DE GESTIÓN', 105, 30, { align: 'center' });
 
         // Cuerpo del documento
         doc.setTextColor(0, 0, 0);
@@ -107,35 +133,54 @@ const reportsUtil = {
         doc.text('Firma del Trabajador', 60, y, { align: 'center' });
         doc.text('Sello y Firma Gerencia', 150, y, { align: 'center' });
 
-        // Pie de página
+        // Pie de página mejorado
+        const footerY = 280;
         doc.setFontSize(8);
         doc.setTextColor(150, 150, 150);
-        const today = new Date().toLocaleDateString('es-ES');
-        doc.text(`Documento generado el ${today} - Copia para el empleado y la empresa`, 105, 285, { align: 'center' });
 
+        let footerText = `Documento generado el ${new Date().toLocaleDateString('es-ES')}`;
+        if (config.companyCif) footerText += ` | CIF: ${config.companyCif}`;
+        if (config.companyAddress) footerText += ` | ${config.companyAddress}`;
+
+        doc.text(footerText, 105, footerY, { align: 'center', maxWidth: 180 });
+
+        reportsUtil.addWatermark(doc);
         doc.save(`Justificante_${(data.full_name || 'Empleado').replace(/\s/g, '_')}.pdf`);
     },
 
     /**
      * Exporta una lista (tabla) a PDF
      */
-    exportTable: (title, columns, rows, fileName, orientation = 'p') => {
-        if (!window.jspdf) {
-            console.error('jsPDF no cargado');
-            return alert('Error: La librería PDF no está cargada.');
-        }
+    exportTable: async (title, columns, rows, fileName, orientation = 'p') => {
+        if (!window.jspdf) return alert('Error: La librería PDF no está cargada.');
+
+        await reportsUtil.loadConfig();
 
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ orientation: orientation });
         const config = reportsUtil.config;
 
+        // Logo
+        if (config.logoBase64) {
+            try {
+                doc.addImage(config.logoBase64, 'PNG', 14, 10, 15, 15, undefined, 'FAST');
+            } catch (e) { }
+        }
+
+        const titleX = config.logoBase64 ? 35 : 14;
+
         doc.setFontSize(18);
         doc.setTextColor(...config.secondaryColor);
-        doc.text(title, 14, 22);
+        doc.text(title, titleX, 20);
 
         doc.setFontSize(10);
         doc.setTextColor(100);
-        doc.text(`${config.companyName} - Generado el ${new Date().toLocaleDateString('es-ES')}`, 14, 30);
+        doc.text(`${config.companyName} - Generado el ${new Date().toLocaleDateString('es-ES')}`, titleX, 28);
+
+        if (config.companyCif) {
+            doc.setFontSize(8);
+            doc.text(`CIF: ${config.companyCif}`, titleX, 32);
+        }
 
         doc.autoTable({
             startY: 40,
@@ -150,6 +195,166 @@ const reportsUtil = {
             }
         });
 
+        reportsUtil.addWatermark(doc);
         doc.save(`${fileName}_${new Date().toISOString().split('T')[0]}.pdf`);
+    },
+
+    /**
+     * Exporta reporte agrupado por día con cálculo de horas trabajadas
+     */
+    exportGroupedAttendancePDF: async (title, groupedData, fileName) => {
+        if (!window.jspdf) return alert('Error: La librería PDF no está cargada.');
+
+        await reportsUtil.loadConfig();
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const config = reportsUtil.config;
+
+        // Cabecera Documento
+        doc.setFillColor(...config.secondaryColor);
+        doc.rect(0, 0, 210, 25, 'F');
+
+        if (config.logoBase64) {
+            try {
+                doc.addImage(config.logoBase64, 'PNG', 6, 3, 19, 19, undefined, 'FAST');
+            } catch (e) { console.warn(e) }
+        }
+
+        const textX = config.logoBase64 ? 30 : 14;
+
+        doc.setFontSize(14);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.text(title, textX, 12);
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.text(config.companyName, textX, 18);
+
+        doc.text(`Generado el: ${new Date().toLocaleDateString('es-ES')}`, 200, 17, { align: 'right' });
+
+        // Preparar filas para autoTable
+        const rows = [];
+        const labels = { in: 'ENTRADA', out: 'SALIDA', break_start: 'PAUSA (INI)', break_end: 'PAUSA (FIN)' };
+
+        Object.keys(groupedData).forEach(key => {
+            const group = groupedData[key];
+            const workTimeMs = reportsUtil.calculateWorkTime(group.logs);
+            const workHours = Math.floor(workTimeMs / (1000 * 60 * 60));
+            const workMinutes = Math.floor((workTimeMs % (1000 * 60 * 60)) / (1000 * 60));
+            const timeString = `${workHours}h ${workMinutes}m`;
+            rows.push([
+                {
+                    content: `${group.date} - ${group.employee} (DNI: ${group.dni || 'N/A'}) - Total: ${timeString}`,
+                    colSpan: 4,
+                    styles: { fillColor: [226, 232, 240], fontStyle: 'bold', textColor: [30, 41, 59] }
+                }
+            ]);
+
+            group.logs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            group.logs.forEach(l => {
+                rows.push([
+                    new Date(l.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+                    labels[l.type] || l.type,
+                    l.location || '-',
+                    l.device_info || '-'
+                ]);
+            });
+        });
+
+        doc.autoTable({
+            startY: 35,
+            head: [['Hora', 'Evento', 'Ubicación', 'Dispositivo']],
+            body: rows,
+            headStyles: { fillColor: config.primaryColor, fontSize: 10 },
+            bodyStyles: { fontSize: 9, cellPadding: 2 },
+            theme: 'grid',
+            columnStyles: {
+                0: { cellWidth: 20 },
+                1: { cellWidth: 40 },
+                2: { cellWidth: 60 },
+                3: { cellWidth: 'auto' }
+            }
+        });
+
+        // Añadir marca de agua
+        reportsUtil.addWatermark(doc);
+
+        // Pie que incluye datos empresa
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            let footer = `Página ${i} de ${pageCount}`;
+            if (config.companyName) footer += ` - ${config.companyName}`;
+            if (config.companyCif) footer += ` - CIF: ${config.companyCif}`;
+            doc.text(footer, 105, 290, { align: 'center' });
+        }
+
+        doc.save(`${fileName}.pdf`);
+    },
+
+    /**
+     * Añade marca de agua a todas las páginas
+     */
+    addWatermark: (doc) => {
+        const config = reportsUtil.config;
+        const totalPages = doc.internal.getNumberOfPages();
+
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            try {
+                if (doc.saveGraphicsState) doc.saveGraphicsState();
+
+                if (window.jspdf.GState) {
+                    doc.setGState(new window.jspdf.GState({ opacity: 0.05 }));
+                } else {
+                    doc.setTextColor(230, 230, 230);
+                }
+
+                const width = doc.internal.pageSize.getWidth();
+                const height = doc.internal.pageSize.getHeight();
+
+                if (config.logoBase64) {
+                    const imgDim = 100;
+                    const x = (width - imgDim) / 2;
+                    const y = (height - imgDim) / 2;
+                    doc.addImage(config.logoBase64, 'PNG', x, y, imgDim, imgDim, undefined, 'FAST');
+                } else {
+                    doc.setFontSize(60);
+                    if (!window.jspdf.GState) doc.setTextColor(240, 240, 240);
+                    else doc.setTextColor(0, 0, 0);
+
+                    doc.text((config.companyName || 'CONFIDENCIAL').toUpperCase(), width / 2, height / 2, {
+                        align: 'center',
+                        angle: 45
+                    });
+                }
+
+                if (doc.restoreGraphicsState) doc.restoreGraphicsState();
+            } catch (e) { console.warn('Watermark error', e); }
+        }
+    },
+
+    /**
+     * Calcula tiempo de trabajo en milisegundos
+     */
+    calculateWorkTime: (logs) => {
+        let totalMs = 0;
+        let lastTime = null;
+        const sorted = [...logs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        sorted.forEach(log => {
+            const time = new Date(log.timestamp).getTime();
+            if (log.type === 'in' || log.type === 'break_end') {
+                lastTime = time;
+            } else if ((log.type === 'out' || log.type === 'break_start') && lastTime !== null) {
+                totalMs += (time - lastTime);
+                lastTime = null;
+            }
+        });
+        return totalMs;
     }
 };

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuración - Sistema de Gestión</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .settings-section {
+            padding-bottom: 2rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .settings-section:last-child {
+            border-bottom: none;
+        }
+
+        .logo-preview {
+            width: 150px;
+            height: 150px;
+            border-radius: var(--radius-md);
+            background: rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            margin-bottom: 1rem;
+            border: 2px dashed rgba(255, 255, 255, 0.1);
+        }
+
+        .logo-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .file-input-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span id="app-logo-icon">👥</span>
+                <span id="app-logo-text">Gestión RH</span>
+            </div>
+        </div>
+
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
+            </li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a>
+            </li>
+            <li class="menu-item"><a href="settings.html" class="menu-link active"><span>⚙️</span> Configuración</a>
+            </li>
+        </ul>
+
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">
+                🚪 Cerrar Sesión
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="card fade-in">
+            <div class="card-header">
+                <h1 class="card-title" style="margin: 0; font-size: 1.5rem;">Configuración del Sistema</h1>
+            </div>
+
+            <div id="alert-container"></div>
+
+            <!-- Datos de la Empresa -->
+            <div class="settings-section">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🏢 Datos de la Empresa</h2>
+                <div class="grid grid-cols-2">
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">Logo de la Empresa</label>
+                            <div class="logo-preview" id="logoPreview">
+                                <span style="color: var(--text-muted);">Sin Logo</span>
+                            </div>
+                            <div class="file-input-wrapper">
+                                <button class="btn btn-secondary">📂 Seleccionar Archivo</button>
+                                <input type="file" id="logoInput" accept="image/*" onchange="handleLogoUpload(this)">
+                            </div>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Recomendado:
+                                500x500px, PNG transparente.</p>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">Nombre de la Empresa</label>
+                            <input type="text" id="companyName" class="form-control" placeholder="Ej. Mi Empresa S.L.">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">CIF / NIF</label>
+                            <input type="text" id="companyCif" class="form-control" placeholder="Ej. B12345678">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Dirección Fiscal</label>
+                            <textarea id="companyAddress" class="form-control" rows="3"
+                                placeholder="Calle, número, CP, ciudad..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="saveCompanySettings()" class="btn btn-primary" style="margin-top: 1rem;">💾 Guardar
+                    Datos Empresa</button>
+            </div>
+
+            <!-- Gestión de Administrador -->
+            <div class="settings-section">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🛡️ Gestión de Administrador</h2>
+                <p
+                    style="color: var(--text-muted); margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.1); padding: 1rem; border-radius: var(--radius-md); border-left: 3px solid #f59e0b;">
+                    ⚠️ Aquí puedes cambiar las credenciales de acceso del administrador. Asegúrate de recordar los
+                    nuevos datos.
+                </p>
+                <div class="grid grid-cols-2">
+                    <div class="form-group">
+                        <label class="form-label">Nuevo Usuario (ID)</label>
+                        <input type="text" id="adminUser" class="form-control" placeholder="Nuevo usuario admin">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nueva Contraseña (Código)</label>
+                        <input type="password" id="adminPass" class="form-control" placeholder="Nueva contraseña">
+                    </div>
+                </div>
+                <button onclick="updateAdminCredentials()" class="btn btn-secondary"
+                    style="border-color: var(--warning); color: var(--warning);">🔐 Actualizar Credenciales</button>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/api.js"></script>
+    <script>
+        if (!isAuthenticated()) {
+            window.location.href = 'index.html';
+        }
+
+        // Fallback para evitar problemas de caché con api.js
+        if (typeof settingsAPI === 'undefined') {
+            console.warn('settingsAPI no encontrado en api.js (caché?), definiendo localmente...');
+            window.settingsAPI = {
+                get: () => callAPI(`${API_URL}/settings`),
+                update: (data) => callAPI(`${API_URL}/settings`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                }),
+                updateAdmin: (data) => callAPI(`${API_URL}/settings/admin-credentials`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                })
+            };
+        }
+
+        let currentLogoBase64 = '';
+
+        // Cargar configuración al iniciar
+        async function loadSettings() {
+            try {
+                const settings = await settingsAPI.get();
+                if (settings) {
+                    document.getElementById('companyName').value = settings.company_name || '';
+                    document.getElementById('companyCif').value = settings.company_cif || '';
+                    document.getElementById('companyAddress').value = settings.company_address || '';
+
+                    if (settings.logo_base64) {
+                        currentLogoBase64 = settings.logo_base64;
+                        document.getElementById('logoPreview').innerHTML = `<img src="${settings.logo_base64}" alt="Logo">`;
+
+                        // Actualizar logo en la sidebar live
+                        updateSidebarLogo(settings.logo_base64);
+                    }
+                }
+            } catch (error) {
+                console.error('Error cargando configuración:', error);
+                showAlert('Error al cargar la configuración', 'error');
+            }
+        }
+
+        // Manejar subida de logo
+        function handleLogoUpload(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    currentLogoBase64 = e.target.result;
+                    document.getElementById('logoPreview').innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        // Actualizar logo en sidebar
+        function updateSidebarLogo(src) {
+            const logoContainer = document.querySelector('.sidebar-logo');
+            // Reemplazar icono por imagen pequeña
+            logoContainer.innerHTML = `
+                <img src="${src}" style="height: 30px; width: auto; max-width: 30px; object-fit: contain;">
+                <span>Gestión RH</span>
+            `;
+        }
+
+        // Guardar configuración de empresa
+        async function saveCompanySettings() {
+            const data = {
+                company_name: document.getElementById('companyName').value,
+                company_cif: document.getElementById('companyCif').value,
+                company_address: document.getElementById('companyAddress').value,
+                logo_base64: currentLogoBase64
+            };
+
+            const result = await settingsAPI.update(data);
+            if (result) {
+                showAlert('Datos de empresa actualizados correctamente', 'success');
+                if (data.logo_base64) updateSidebarLogo(data.logo_base64);
+            }
+        }
+
+        // Actualizar credenciales admin
+        async function updateAdminCredentials() {
+            const newUsername = document.getElementById('adminUser').value;
+            const newPass = document.getElementById('adminPass').value;
+
+            if (!newUsername && !newPass) {
+                return showAlert('Introduce al menos un campo para actualizar', 'warning');
+            }
+
+            if (confirm('¿Estás seguro de que quieres cambiar las credenciales de administrador? Tendrás que volver a iniciar sesión.')) {
+                const result = await settingsAPI.updateAdmin({
+                    new_username: newUsername,
+                    new_password: newPass
+                });
+
+                if (result) {
+                    showAlert('Credenciales actualizadas. Redirigiendo...', 'success');
+                    setTimeout(() => {
+                        logout();
+                    }, 2000);
+                }
+            }
+        }
+
+        loadSettings();
+    </script>
+</body>
+
+</html>

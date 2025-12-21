@@ -62,6 +62,24 @@ async function callAPI(url, options = {}) {
     return data;
 }
 
+const authAPI = {
+    changePassword: async (newPassword, token) => {
+        const response = await fetch(`${API_URL}/auth/change-password`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ newPassword })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Error al cambiar la contraseña');
+        }
+        return data;
+    }
+};
+
 // API - Empleados
 const employeesAPI = {
     getAll: (params = {}) => {
@@ -147,6 +165,19 @@ const attendanceAPI = {
         const query = new URLSearchParams(params).toString();
         return callAPI(`${API_URL}/attendance/report?${query}`);
     }
+};
+
+// Configuración API
+const settingsAPI = {
+    get: () => callAPI(`${API_URL}/settings`),
+    update: (data) => callAPI(`${API_URL}/settings`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    updateAdmin: (data) => callAPI(`${API_URL}/settings/admin-credentials`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    })
 };
 
 // Utilidades
