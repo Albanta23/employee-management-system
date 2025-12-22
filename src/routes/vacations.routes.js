@@ -7,6 +7,27 @@ const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStor
 
 router.use(authenticateToken);
 
+function isEmployeeUser(user) {
+    return !!user && (user.role === 'employee' || (!!user.employee_id && !user.role));
+}
+
+function ensureEmployeeLinked(req, res) {
+    if (!req.user || !req.user.employee_id) {
+        res.status(403).json({ error: 'Usuario no vinculado a un empleado' });
+        return false;
+    }
+    return true;
+}
+
+function ensureSelfEmployee(req, res, employeeId) {
+    if (!ensureEmployeeLinked(req, res)) return false;
+    if (String(employeeId) !== String(req.user.employee_id)) {
+        res.status(403).json({ error: 'Acceso denegado' });
+        return false;
+    }
+    return true;
+}
+
 function getFeatureKeyForType(type) {
     return String(type || '').toLowerCase() === 'vacation' ? 'vacations' : 'permissions';
 }
@@ -79,16 +100,23 @@ async function buildTimeOffBalanceForEmployee(employeeId, year) {
 // Saldo de vacaciones/permisos por empleado (por año)
 router.get('/balance', async (req, res) => {
     try {
-        const hasAccess = await requireFeatureAccess(req, res, 'vacations');
-        if (!hasAccess) return;
-
         const { employee_id } = req.query;
         if (!employee_id) {
             return res.status(400).json({ error: 'employee_id es requerido' });
         }
 
+        if (!isEmployeeUser(req.user)) {
+            const hasAccess = await requireFeatureAccess(req, res, 'vacations');
+            if (!hasAccess) return;
+        } else {
+            if (!ensureEmployeeLinked(req, res)) return;
+            if (!ensureSelfEmployee(req, res, employee_id)) return;
+        }
+
         const year = parseYear(req.query.year);
-        const employee = await getEmployeeInScope(req, res, employee_id);
+        const employee = isEmployeeUser(req.user)
+            ? await Employee.findById(employee_id).lean()
+            : await getEmployeeInScope(req, res, employee_id);
         if (!employee) return;
 
         const balance = await buildTimeOffBalanceForEmployee(employee_id, year);
@@ -109,6 +137,9 @@ router.get('/balance', async (req, res) => {
 // Saldos por año para todos los empleados en scope (útil para administración/reportes)
 router.get('/balances', async (req, res) => {
     try {
+        if (isEmployeeUser(req.user)) {
+            return res.status(403).json({ error: 'Acceso denegado' });
+        }
         const hasAccess = await requireFeatureAccess(req, res, 'vacations');
         if (!hasAccess) return;
 
@@ -193,18 +224,25 @@ router.get('/balances', async (req, res) => {
 // Obtener todas las vacaciones con filtros
 router.get('/', async (req, res) => {
     try {
-        // vacations.html llama con type=vacation; permissions.html llama sin type y filtra en cliente.
-        const featureKey = req.query && 'type' in req.query
-            ? getFeatureKeyForType(req.query.type)
-            : 'permissions';
+        if (!isEmployeeUser(req.user)) {
+            // vacations.html llama con type=vacation; permissions.html llama sin type y filtra en cliente.
+            const featureKey = req.query && 'type' in req.query
+                ? getFeatureKeyForType(req.query.type)
+                : 'permissions';
 
-        const hasAccess = await requireFeatureAccess(req, res, featureKey);
-        if (!hasAccess) return;
+            const hasAccess = await requireFeatureAccess(req, res, featureKey);
+            if (!hasAccess) return;
+        }
 
         const { employee_id, status, year, type } = req.query;
         const query = {};
 
-        if (employee_id) {
+        if (isEmployeeUser(req.user)) {
+            if (!ensureEmployeeLinked(req, res)) return;
+            if (employee_id && !ensureSelfEmployee(req, res, employee_id)) return;
+            // Empleado: solo puede ver sus propias solicitudes
+            query.employee_id = req.user.employee_id;
+        } else if (employee_id) {
             const ok = await ensureEmployeeInScope(req, res, employee_id);
             if (!ok) return;
             query.employee_id = employee_id;
@@ -254,11 +292,16 @@ const { calculateVacationDays } = require('../utils/dateUtils');
 // Crear solicitud de vacaciones
 router.post('/', async (req, res) => {
     try {
-        const featureKey = getFeatureKeyForType(req.body?.type);
-        const hasAccess = await requireFeatureAccess(req, res, featureKey);
-        if (!hasAccess) return;
+        if (!isEmployeeUser(req.user)) {
+            const featureKey = getFeatureKeyForType(req.body?.type);
+            const hasAccess = await requireFeatureAccess(req, res, featureKey);
+            if (!hasAccess) return;
+        }
 
-        const { employee_id, start_date, end_date, type, reason } = req.body;
+        const bodyEmployeeId = req.body?.employee_id;
+        if (isEmployeeUser(req.user) && !ensureEmployeeLinked(req, res)) return;
+        const employee_id = isEmployeeUser(req.user) ? req.user.employee_id : bodyEmployeeId;
+        const { start_date, end_date, type, reason } = req.body;
 
         if (!employee_id || !start_date || !end_date) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
@@ -267,8 +310,12 @@ router.post('/', async (req, res) => {
         const employee = await Employee.findById(employee_id);
         if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
 
-        const ok = await ensureEmployeeInScope(req, res, employee_id);
-        if (!ok) return;
+        if (isEmployeeUser(req.user)) {
+            if (!ensureSelfEmployee(req, res, employee_id)) return;
+        } else {
+            const ok = await ensureEmployeeInScope(req, res, employee_id);
+            if (!ok) return;
+        }
 
         // Cálculo automático de días reales (naturales menos festivos/findes según convenio)
         const days = await calculateVacationDays(new Date(start_date), new Date(end_date), employee.location);
@@ -292,32 +339,57 @@ router.put('/:id', async (req, res) => {
         const { status, reason, start_date, end_date, type, days } = req.body;
         const update = {};
 
-        // Si se envía status, es una aprobación/rechazo (normalmente admin)
-        if (status) {
-            update.status = status;
-            if (status === 'approved') {
-                update.approved_by = req.user.id;
-                update.approved_date = new Date();
-            }
-        }
-
-        // Permitir actualizar datos si es pendiente o si se fuerzan los datos
         const existing = await Vacation.findById(req.params.id);
         if (!existing) return res.status(404).json({ error: 'Solicitud no encontrada' });
 
-        const featureKey = getFeatureKeyForType(existing.type);
-        const hasAccess = await requireFeatureAccess(req, res, featureKey);
-        if (!hasAccess) return;
+        if (isEmployeeUser(req.user)) {
+            if (!ensureSelfEmployee(req, res, existing.employee_id)) return;
 
-        const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
-        if (!ok) return;
+            // Empleado: solo puede editar si está pendiente y NO puede cambiar el status
+            if (status) {
+                return res.status(403).json({ error: 'No tienes permiso para cambiar el estado' });
+            }
+            if (existing.status !== 'pending') {
+                return res.status(403).json({ error: 'Solo puedes modificar solicitudes pendientes' });
+            }
 
-        if (existing.status === 'pending' || req.user.role === 'admin' || req.user.role === 'store_coordinator') {
             if (start_date) update.start_date = start_date;
             if (end_date) update.end_date = end_date;
             if (type) update.type = type;
-            if (reason) update.reason = reason;
-            if (days) update.days = days;
+            if (reason !== undefined) update.reason = reason;
+
+            // Recalcular días si cambia rango (no confiar en el cliente)
+            if (start_date || end_date) {
+                const employee = await Employee.findById(existing.employee_id).select('location').lean();
+                if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+                const newStart = new Date(update.start_date || existing.start_date);
+                const newEnd = new Date(update.end_date || existing.end_date);
+                update.days = await calculateVacationDays(newStart, newEnd, employee.location);
+            }
+        } else {
+            // Si se envía status, es una aprobación/rechazo (normalmente admin)
+            if (status) {
+                update.status = status;
+                if (status === 'approved') {
+                    update.approved_by = req.user.id;
+                    update.approved_date = new Date();
+                }
+            }
+
+            const featureKey = getFeatureKeyForType(existing.type);
+            const hasAccess = await requireFeatureAccess(req, res, featureKey);
+            if (!hasAccess) return;
+
+            const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
+            if (!ok) return;
+
+            if (existing.status === 'pending' || req.user.role === 'admin' || req.user.role === 'store_coordinator') {
+                if (start_date) update.start_date = start_date;
+                if (end_date) update.end_date = end_date;
+                if (type) update.type = type;
+                if (reason) update.reason = reason;
+                if (days) update.days = days;
+            }
         }
 
         const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
@@ -335,12 +407,16 @@ router.get('/:id', async (req, res) => {
         const vacation = await Vacation.findById(req.params.id).populate('employee_id');
         if (!vacation) return res.status(404).json({ error: 'Solicitud no encontrada' });
 
-        const featureKey = getFeatureKeyForType(vacation.type);
-        const hasAccess = await requireFeatureAccess(req, res, featureKey);
-        if (!hasAccess) return;
+        if (isEmployeeUser(req.user)) {
+            if (!ensureSelfEmployee(req, res, vacation.employee_id?._id)) return;
+        } else {
+            const featureKey = getFeatureKeyForType(vacation.type);
+            const hasAccess = await requireFeatureAccess(req, res, featureKey);
+            if (!hasAccess) return;
 
-        const ok = await ensureEmployeeInScope(req, res, vacation.employee_id?._id);
-        if (!ok) return;
+            const ok = await ensureEmployeeInScope(req, res, vacation.employee_id?._id);
+            if (!ok) return;
+        }
 
         res.json({
             ...vacation._doc,
@@ -361,12 +437,19 @@ router.delete('/:id', async (req, res) => {
         const existing = await Vacation.findById(req.params.id);
         if (!existing) return res.status(404).json({ error: 'Solicitud no encontrada' });
 
-        const featureKey = getFeatureKeyForType(existing.type);
-        const hasAccess = await requireFeatureAccess(req, res, featureKey);
-        if (!hasAccess) return;
+        if (isEmployeeUser(req.user)) {
+            if (!ensureSelfEmployee(req, res, existing.employee_id)) return;
+            if (existing.status !== 'pending') {
+                return res.status(403).json({ error: 'Solo puedes eliminar solicitudes pendientes' });
+            }
+        } else {
+            const featureKey = getFeatureKeyForType(existing.type);
+            const hasAccess = await requireFeatureAccess(req, res, featureKey);
+            if (!hasAccess) return;
 
-        const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
-        if (!ok) return;
+            const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
+            if (!ok) return;
+        }
 
         await Vacation.findByIdAndDelete(req.params.id);
         res.json({ message: 'Solicitud eliminada correctamente' });

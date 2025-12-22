@@ -3,7 +3,12 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Employee = require('../models/Employee');
 require('dotenv').config();
+
+function normalizeDni(value) {
+    return String(value || '').trim().toUpperCase();
+}
 
 function withTimeout(promise, ms, label) {
     let timer;
@@ -79,13 +84,33 @@ router.post('/login', async (req, res) => {
             });
         }
 
+        // Auto-vincular employee_id por DNI si falta (caso típico tras migraciones/seeds)
+        let resolvedEmployeeId = user.employee_id;
+        let resolvedEmployeeLocation = null;
+        if (user.role === 'employee' && !resolvedEmployeeId) {
+            const dni = normalizeDni(username);
+            const employee = await withTimeout(
+                Employee.findOne({ dni }).select('_id location').lean().maxTimeMS(5000),
+                5500,
+                'Employee.findOne (login auto-link)'
+            );
+
+            if (employee && employee._id) {
+                resolvedEmployeeId = employee._id;
+                resolvedEmployeeLocation = employee.location || null;
+                // Persistimos el vínculo para futuras sesiones
+                user.employee_id = employee._id;
+                await withTimeout(user.save(), 5500, 'User.save (login auto-link)');
+            }
+        }
+
         // Si no, procedemos con el login normal
         const token = jwt.sign(
             {
                 id: user._id,
                 username: user.username,
                 role: user.role || 'admin',
-                employee_id: user.employee_id
+                employee_id: resolvedEmployeeId
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -99,7 +124,9 @@ router.post('/login', async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role || 'admin',
-                employee_id: user.employee_id
+                employee_id: resolvedEmployeeId,
+                // Útil para el portal empleado (cálculo de días / UI)
+                location: resolvedEmployeeLocation
             }
         });
 
