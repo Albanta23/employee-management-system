@@ -499,21 +499,57 @@
             const btns = container.querySelectorAll('button');
             btns.forEach(b => b.disabled = true);
 
-            // Obtener geolocalización
+            // Obtener geolocalización (solo al fichar)
+            // Nota: en navegadores modernos la geolocalización requiere HTTPS (o localhost).
+            // Importante: en algunos móviles, si haces `await` antes de llamar a getCurrentPosition,
+            // el navegador puede considerar que ya no es un gesto de usuario y no mostrar el prompt.
             let latitude = null, longitude = null;
-            if ("geolocation" in navigator) {
+            const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+            const isSecure = window.isSecureContext || isLocalhost;
+
+            function geoGetCurrentPosition(options) {
+                return new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+                });
+            }
+
+            if (!isSecure) {
+                showAlert('⚠️ La ubicación (GPS) requiere abrir la app en HTTPS. Se registrará el fichaje sin coordenadas.', 'warning');
+            } else if ("geolocation" in navigator) {
                 try {
-                    const pos = await new Promise((res, rej) => {
-                        navigator.geolocation.getCurrentPosition(res, rej, {
-                            timeout: 8000,
-                            enableHighAccuracy: true
-                        });
+                    // Intento 1: más compatible (menos exigente). Útil en móviles.
+                    const pos = await geoGetCurrentPosition({
+                        timeout: 25000,
+                        enableHighAccuracy: false,
+                        maximumAge: 30000
                     });
                     latitude = pos.coords.latitude;
                     longitude = pos.coords.longitude;
-                } catch (e) {
-                    console.warn('Geo no disponible o denegada:', e.message);
-                    showAlert('⚠️ No se pudo obtener la ubicación exacta, pero se registrará el fichaje.', 'warning');
+                } catch (e1) {
+                    // Intento 2: alta precisión (por si el 1 falla por provider)
+                    try {
+                        const pos2 = await geoGetCurrentPosition({
+                            timeout: 25000,
+                            enableHighAccuracy: true,
+                            maximumAge: 0
+                        });
+                        latitude = pos2.coords.latitude;
+                        longitude = pos2.coords.longitude;
+                    } catch (e2) {
+                        const err = e2 || e1;
+                        const code = err && typeof err.code === 'number' ? err.code : null;
+                        // 1: PERMISSION_DENIED, 2: POSITION_UNAVAILABLE, 3: TIMEOUT
+                        if (code === 1) {
+                            showAlert('⚠️ Permiso de ubicación denegado. En el móvil, activa Ubicación para el navegador (Safari/Chrome) y vuelve a intentar.', 'warning');
+                        } else if (code === 2) {
+                            showAlert('⚠️ Ubicación no disponible en este dispositivo ahora mismo. Se registrará el fichaje sin coordenadas.', 'warning');
+                        } else if (code === 3) {
+                            showAlert('⚠️ Tiempo de espera agotado al obtener GPS. Se registrará el fichaje sin coordenadas.', 'warning');
+                        } else {
+                            showAlert('⚠️ No se pudo obtener la ubicación exacta, pero se registrará el fichaje.', 'warning');
+                        }
+                        console.warn('Geo no disponible o denegada:', err && err.message ? err.message : err);
+                    }
                 }
             }
 
@@ -563,6 +599,18 @@
             const emojis = { in: '📍', out: '🏠', break_start: '☕', break_end: '🔄' };
             const labels = { in: 'Entrada', out: 'Salida', break_start: 'Inicio Descanso', break_end: 'Fin Descanso' };
 
+            function renderLocationLine(log) {
+                const hasCoords = log && log.latitude != null && log.longitude != null;
+                if (hasCoords) {
+                    const lat = Number(log.latitude);
+                    const lon = Number(log.longitude);
+                    if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+                        return `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" style="color: var(--primary-light); text-decoration: none;">📍 Ver mapa</a>`;
+                    }
+                }
+                return log.location || 'Ubicación no disponible';
+            }
+
             container.innerHTML = sortedDates.map(date => {
                 const dayLogs = groups[date];
                 // Ordenar logs cronológicamente dentro del día
@@ -591,7 +639,7 @@
                                     <div style="margin-right: 1rem; font-size: 1.25rem;">${emojis[log.type]}</div>
                                     <div style="flex: 1;">
                                         <div style="font-size: 0.875rem; font-weight: 500;">${labels[log.type]}</div>
-                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${log.location || 'Ubicación no disponible'}</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">${renderLocationLine(log)}</div>
                                     </div>
                                     <div style="font-family: monospace; font-size: 0.9rem; color: var(--text-secondary);">${time}</div>
                                 </div>
