@@ -10,7 +10,11 @@
     "change-password": "node scripts/change-password.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
-    "seed-locations-from-employees": "node scripts/seed-locations-from-employees.js"
+    "seed-locations-from-employees": "node scripts/seed-locations-from-employees.js",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:apk": "cd android && ./gradlew assembleDebug",
+    "android:aab": "cd android && ./gradlew bundleRelease"
   },
   "keywords": [
     "employee",
@@ -21,6 +25,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -29,5 +35,8 @@
     "mongoose": "^9.0.2",
     "sqlite3": "^5.1.7",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0"
   }
 }

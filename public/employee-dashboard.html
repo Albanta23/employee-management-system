@@ -423,6 +423,27 @@
                 renderControls();
                 updateStatusBadge(currentStatus);
                 loadHistory();
+                checkComplianceToday();
+            }
+        }
+
+        async function checkComplianceToday() {
+            const today = new Date().toISOString().split('T')[0];
+            const data = await attendanceAPI.getCompliance({ start_date: today, end_date: today });
+            if (!data || !data.scheduleEnabled || !data.days || data.days.length === 0) return;
+
+            const day = data.days[0];
+            if (!day || !day.workingDay) return;
+
+            const issues = day.issues || [];
+            // Avisos simples y no invasivos
+            if (issues.includes('missing_in') && (currentStatus === 'none' || currentStatus === 'out')) {
+                showAlert('⏰ Según tu horario, te falta fichar la entrada hoy', 'warning');
+                return;
+            }
+            if (issues.includes('missing_out') && (currentStatus === 'in' || currentStatus === 'break_start' || currentStatus === 'break_end')) {
+                showAlert('⏰ Según tu horario, te falta fichar la salida hoy', 'warning');
+                return;
             }
         }
 

@@ -208,6 +208,10 @@ const attendanceAPI = {
     getReport: (params = {}) => {
         const query = new URLSearchParams(params).toString();
         return callAPI(`${API_URL}/attendance/report?${query}`);
+    },
+    getCompliance: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/attendance/compliance?${query}`);
     }
 };
 

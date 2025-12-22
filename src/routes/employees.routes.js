@@ -259,11 +259,79 @@ router.put('/:id', async (req, res) => {
         const isOwnProfile = req.user && req.user.employee_id && req.user.employee_id === req.params.id;
         
         if (isOwnProfile) {
-            // Empleado solo puede actualizar email y teléfono de su propio perfil
-            const { email, phone } = req.body;
+            function isValidTimeHHmm(value) {
+                if (typeof value !== 'string') return false;
+                const m = value.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+                return Boolean(m);
+            }
+
+            function normalizeSchedule(schedule) {
+                if (!schedule || typeof schedule !== 'object') return null;
+
+                const normalized = {};
+                if (schedule.enabled !== undefined) normalized.enabled = Boolean(schedule.enabled);
+
+                if (schedule.days_of_week !== undefined) {
+                    if (!Array.isArray(schedule.days_of_week)) {
+                        throw new Error('days_of_week debe ser un array');
+                    }
+                    const days = schedule.days_of_week
+                        .map((d) => Number(d))
+                        .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+                    normalized.days_of_week = Array.from(new Set(days));
+                }
+
+                if (schedule.start_time !== undefined) {
+                    if (!isValidTimeHHmm(schedule.start_time)) throw new Error('start_time debe tener formato HH:mm');
+                    normalized.start_time = schedule.start_time;
+                }
+
+                if (schedule.end_time !== undefined) {
+                    if (!isValidTimeHHmm(schedule.end_time)) throw new Error('end_time debe tener formato HH:mm');
+                    normalized.end_time = schedule.end_time;
+                }
+
+                if (schedule.break_start !== undefined) {
+                    if (schedule.break_start !== '' && !isValidTimeHHmm(schedule.break_start)) throw new Error('break_start debe tener formato HH:mm o vacío');
+                    normalized.break_start = schedule.break_start;
+                }
+
+                if (schedule.break_end !== undefined) {
+                    if (schedule.break_end !== '' && !isValidTimeHHmm(schedule.break_end)) throw new Error('break_end debe tener formato HH:mm o vacío');
+                    normalized.break_end = schedule.break_end;
+                }
+
+                if (schedule.tolerance_minutes !== undefined) {
+                    const tol = Number(schedule.tolerance_minutes);
+                    if (!Number.isFinite(tol) || tol < 0 || tol > 180) throw new Error('tolerance_minutes debe ser un número entre 0 y 180');
+                    normalized.tolerance_minutes = Math.round(tol);
+                }
+
+                // Validación cruzada mínima de descanso: o vienen ambos o ninguno
+                const hasBreakStart = Object.prototype.hasOwnProperty.call(normalized, 'break_start') ? normalized.break_start : schedule.break_start;
+                const hasBreakEnd = Object.prototype.hasOwnProperty.call(normalized, 'break_end') ? normalized.break_end : schedule.break_end;
+
+                if ((hasBreakStart && !hasBreakEnd) || (!hasBreakStart && hasBreakEnd)) {
+                    throw new Error('Para usar descanso, deben indicarse break_start y break_end');
+                }
+
+                return normalized;
+            }
+
+            // Empleado puede actualizar email, teléfono y su horario
+            const { email, phone, work_schedule } = req.body;
             const update = {};
             if (email !== undefined) update.email = email;
             if (phone !== undefined) update.phone = phone;
+
+            if (work_schedule !== undefined) {
+                try {
+                    const normalized = normalizeSchedule(work_schedule);
+                    if (normalized) update.work_schedule = normalized;
+                } catch (e) {
+                    return res.status(400).json({ error: e.message || 'work_schedule inválido' });
+                }
+            }
             
             const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true });
             if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });

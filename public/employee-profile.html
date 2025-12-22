@@ -181,6 +181,61 @@
             </div>
         </div>
 
+        <h3 style="font-size: 1.1rem; margin: 1.75rem 0 1rem; color: var(--primary-light);">Mi horario</h3>
+        <div class="info-group">
+            <div class="info-row">
+                <span class="info-label">Activar control por horario</span>
+                <div class="info-value">
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" id="schedule_enabled">
+                        <span style="font-size: 0.9rem;">Quiero que el sistema valide mis fichajes</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Días laborables</span>
+                <div class="info-value" style="display:flex; gap:0.5rem; flex-wrap: wrap;">
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="1">L</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="2">M</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="3">X</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="4">J</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="5">V</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="6">S</label>
+                    <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" class="schedule-day" value="0">D</label>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Entrada (HH:mm)</span>
+                <div class="info-value">
+                    <input type="time" id="schedule_start" required>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Salida (HH:mm)</span>
+                <div class="info-value">
+                    <input type="time" id="schedule_end" required>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Descanso (opcional)</span>
+                <div class="info-value" style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                    <input type="time" id="schedule_break_start" placeholder="Inicio">
+                    <input type="time" id="schedule_break_end" placeholder="Fin">
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Tolerancia (minutos)</span>
+                <div class="info-value">
+                    <input type="number" id="schedule_tolerance" min="0" max="180" step="1" required>
+                </div>
+            </div>
+        </div>
+
         <button type="submit" class="btn btn-primary" style="width: 100%; padding: 1rem; margin-bottom: 1rem;">
             Guardar Cambios
         </button>
@@ -229,6 +284,20 @@
 
                 document.getElementById('email').value = employeeData.email || '';
                 document.getElementById('phone').value = employeeData.phone || '';
+
+                // Cargar horario
+                const ws = employeeData.work_schedule || {};
+                document.getElementById('schedule_enabled').checked = ws.enabled === true;
+                document.getElementById('schedule_start').value = ws.start_time || '09:00';
+                document.getElementById('schedule_end').value = ws.end_time || '18:00';
+                document.getElementById('schedule_break_start').value = ws.break_start || '';
+                document.getElementById('schedule_break_end').value = ws.break_end || '';
+                document.getElementById('schedule_tolerance').value = (ws.tolerance_minutes ?? 10);
+
+                const days = Array.isArray(ws.days_of_week) ? ws.days_of_week.map(Number) : [1, 2, 3, 4, 5];
+                document.querySelectorAll('.schedule-day').forEach(cb => {
+                    cb.checked = days.includes(Number(cb.value));
+                });
 
                 // Cargar avatar local
                 loadLocalAvatar(employeeData.full_name);
@@ -304,9 +373,24 @@
         document.getElementById('profile-form').addEventListener('submit', async (e) => {
             e.preventDefault();
 
+            const days = Array.from(document.querySelectorAll('.schedule-day'))
+                .filter(cb => cb.checked)
+                .map(cb => Number(cb.value));
+
+            const work_schedule = {
+                enabled: document.getElementById('schedule_enabled').checked,
+                days_of_week: days,
+                start_time: document.getElementById('schedule_start').value,
+                end_time: document.getElementById('schedule_end').value,
+                break_start: document.getElementById('schedule_break_start').value || '',
+                break_end: document.getElementById('schedule_break_end').value || '',
+                tolerance_minutes: Number(document.getElementById('schedule_tolerance').value)
+            };
+
             const updatedData = {
                 email: document.getElementById('email').value,
-                phone: document.getElementById('phone').value
+                phone: document.getElementById('phone').value,
+                work_schedule
             };
 
             const res = await employeesAPI.update(user.employee_id, updatedData);

@@ -1,0 +1,9 @@
+{
+  "appId": "com.example.employeemanagement",
+  "appName": "Employee Management",
+  "webDir": "public",
+  "server": {
+    "url": "https://pedidosweb-cestaproduccion.vercel.app/",
+    "cleartext": false
+  }
+}
