@@ -5,6 +5,9 @@ let currentStoreId = null;
 let currentYear = new Date().getFullYear();
 let currentUser = null;
 
+let currentStoreEmployees = null; // [{...Employee}]
+let currentStoreEmployeesStoreName = null;
+
 let locations = [];
 let currentCalendar = null; // { year, locationName, storeName, holidays: [] }
 let currentLocation = null; // ubicación cargada en vista tiendas
@@ -173,12 +176,94 @@ async function loadCalendar() {
 
         currentCalendar = data;
         renderCalendar(data);
+        // Cargar empleados de la tienda en paralelo (no depende del año)
+        void loadStoreEmployeesForCurrentStore();
         hideLoading();
     } catch (error) {
         hideLoading();
         console.error('Error cargando calendario:', error);
         showError('Error al cargar calendario: ' + (error?.message || 'Error desconocido'));
     }
+}
+
+async function loadStoreEmployeesForCurrentStore() {
+    const storeName = currentCalendar?.storeName;
+    const locationName = currentCalendar?.locationName;
+    const titleEl = document.getElementById('store-employees-title');
+    const container = document.getElementById('store-employees-container');
+    if (!container) return;
+
+    if (titleEl) {
+        titleEl.textContent = storeName ? `👥 Empleados de ${storeName}` : '👥 Empleados';
+    }
+
+    if (!storeName) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Selecciona una tienda para ver empleados</div></div>';
+        return;
+    }
+
+    // Si ya tenemos la lista para esta tienda, re-renderizamos sin pedir al servidor.
+    if (currentStoreEmployeesStoreName === storeName && Array.isArray(currentStoreEmployees)) {
+        renderStoreEmployees(currentStoreEmployees, { storeName, locationName });
+        return;
+    }
+
+    container.innerHTML = '<div style="color: var(--text-muted); padding: 0.75rem;">Cargando empleados...</div>';
+
+    try {
+        // Importante: en el sistema, Employee.location es un string (normalmente el nombre de la tienda).
+        const res = await employeesAPI.getAll({
+            location: storeName,
+            status: 'active',
+            page: 1,
+            limit: 200
+        });
+
+        const employees = res && Array.isArray(res.employees) ? res.employees : (Array.isArray(res) ? res : []);
+        currentStoreEmployees = employees;
+        currentStoreEmployeesStoreName = storeName;
+
+        renderStoreEmployees(employees, { storeName, locationName, total: res?.pagination?.total });
+    } catch (e) {
+        console.error('Error cargando empleados por tienda:', e);
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No se pudieron cargar los empleados</div></div>';
+    }
+}
+
+function renderStoreEmployees(employees, { storeName, locationName, total } = {}) {
+    const container = document.getElementById('store-employees-container');
+    if (!container) return;
+
+    if (!Array.isArray(employees) || employees.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <div class="empty-state-text">No hay empleados asignados a ${escapeHtml(storeName || 'esta tienda')}</div>
+                <div style="color: var(--text-muted); font-size: 0.9rem;">Revisa el campo “Ubicación” del empleado (debe coincidir con el nombre de la tienda).</div>
+            </div>
+        `;
+        return;
+    }
+
+    const note = (Number.isFinite(Number(total)) && total > employees.length)
+        ? `<div style="grid-column: 1 / -1; color: var(--text-muted); font-size: 0.85rem;">Mostrando ${employees.length} de ${total}</div>`
+        : '';
+
+    container.innerHTML = employees.map(e => {
+        const name = escapeHtml(e.full_name || e.name || 'Empleado');
+        const dni = escapeHtml(e.dni || '-');
+        const position = escapeHtml(e.position || '-');
+        const loc = escapeHtml(e.location || locationName || '-');
+
+        return `
+            <div class="store-card" style="cursor: default;">
+                <div class="store-card-title">👤 ${name}</div>
+                <div class="store-card-address">🪪 ${dni}</div>
+                <div class="store-card-address">💼 ${position}</div>
+                <div class="store-card-address">📍 ${loc}</div>
+            </div>
+        `;
+    }).join('') + note;
 }
 
 // ==================== RENDER ====================
@@ -442,6 +527,12 @@ function showCalendarView(locationId, storeId) {
     currentView = 'calendar';
     currentLocationId = locationId;
     currentStoreId = storeId;
+
+    // Reset cache al cambiar de tienda
+    currentStoreEmployees = null;
+    currentStoreEmployeesStoreName = null;
+    const employeesContainer = document.getElementById('store-employees-container');
+    if (employeesContainer) employeesContainer.innerHTML = '';
 
     document.getElementById('locations-view').style.display = 'none';
     document.getElementById('stores-view').style.display = 'none';

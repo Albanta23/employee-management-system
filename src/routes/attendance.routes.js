@@ -36,14 +36,16 @@ async function autoCloseForgottenOutsForEmployee(employeeId, { lookbackDays = 7 
         if (!lastRecord) continue;
         if (lastRecord.type === 'out') continue;
 
-        // Idempotencia: si ya existe un OUT ese día, no creamos otro.
-        const existingOut = await Attendance.findOne({
+        // Idempotencia para turnos partidos:
+        // Solo evitamos autocerrar si YA existe un OUT DESPUÉS del último fichaje.
+        // (En turnos partidos puede haber OUT a mediodía, y luego un IN por la tarde.)
+        const existingOutAfterLast = await Attendance.findOne({
             employee_id: employeeId,
             type: 'out',
-            timestamp: { $gte: dayStart, $lte: dayEnd }
+            timestamp: { $gt: lastRecord.timestamp, $lte: dayEnd }
         }).sort({ timestamp: -1 });
 
-        if (existingOut) continue;
+        if (existingOutAfterLast) continue;
 
         // Crear el OUT al final del día (o al menos después del último fichaje del día)
         const outTimestamp = new Date(Math.max(dayEnd.getTime(), lastRecord.timestamp.getTime()));
@@ -98,6 +100,51 @@ function pickClosestLog(logs, targetTime) {
     return best;
 }
 
+function normalizeOverridesContainer(overrides) {
+    // Acepta Map (mongoose) u objeto plano
+    if (!overrides) return null;
+    if (overrides instanceof Map) {
+        const out = {};
+        for (const [k, v] of overrides.entries()) out[String(k)] = v;
+        return out;
+    }
+    if (typeof overrides === 'object' && !Array.isArray(overrides)) return overrides;
+    return null;
+}
+
+function getScheduleForDay(baseSchedule, dateKey, dow) {
+    const base = baseSchedule || {};
+    const baseDays = Array.isArray(base.days_of_week) ? base.days_of_week : [1, 2, 3, 4, 5];
+    const baseWorking = baseDays.includes(dow);
+
+    const dayOverrides = normalizeOverridesContainer(base.day_overrides);
+    const dayOverride = dayOverrides ? dayOverrides[String(dow)] : null;
+
+    const dateOverrides = Array.isArray(base.date_overrides) ? base.date_overrides : [];
+    const dateOverride = dateOverrides.find(o => o && o.date === dateKey) || null;
+
+    const chosen = dateOverride || dayOverride || null;
+
+    // enabled puede forzar trabajar/no trabajar ese día
+    const enabled = chosen && Object.prototype.hasOwnProperty.call(chosen, 'enabled') ? Boolean(chosen.enabled) : null;
+    const workingDay = enabled === null ? baseWorking : enabled;
+
+    const start_time = (chosen && chosen.start_time) ? chosen.start_time : base.start_time;
+    const end_time = (chosen && chosen.end_time) ? chosen.end_time : base.end_time;
+    const break_start = (chosen && chosen.break_start !== undefined) ? chosen.break_start : base.break_start;
+    const break_end = (chosen && chosen.break_end !== undefined) ? chosen.break_end : base.break_end;
+    const tolerance = Number.isFinite(Number(base.tolerance_minutes)) ? Number(base.tolerance_minutes) : 10;
+
+    return {
+        workingDay,
+        start_time,
+        end_time,
+        break_start,
+        break_end,
+        tolerance_minutes: tolerance
+    };
+}
+
 async function buildComplianceForEmployee(employeeId, { startDate, endDate } = {}) {
     const employee = await Employee.findById(employeeId).lean();
     const schedule = employee?.work_schedule || null;
@@ -106,22 +153,9 @@ async function buildComplianceForEmployee(employeeId, { startDate, endDate } = {
         return { scheduleEnabled: false, schedule: schedule || null, days: [] };
     }
 
-    const daysOfWeek = Array.isArray(schedule.days_of_week) ? schedule.days_of_week : [1, 2, 3, 4, 5];
-    const startTime = schedule.start_time;
-    const endTime = schedule.end_time;
-    const breakStart = schedule.break_start;
-    const breakEnd = schedule.break_end;
-    const tolerance = Number.isFinite(Number(schedule.tolerance_minutes)) ? Number(schedule.tolerance_minutes) : 10;
-
-    if (!isValidTimeHHmm(startTime) || !isValidTimeHHmm(endTime)) {
+    // Validación mínima del horario base (los overrides se validan al guardar desde /employees/:id)
+    if (!isValidTimeHHmm(schedule.start_time) || !isValidTimeHHmm(schedule.end_time)) {
         return { scheduleEnabled: true, schedule, days: [], warning: 'Horario inválido: start_time/end_time' };
-    }
-    const hasBreak = Boolean(breakStart) && Boolean(breakEnd);
-    if ((Boolean(breakStart) || Boolean(breakEnd)) && !(Boolean(breakStart) && Boolean(breakEnd))) {
-        return { scheduleEnabled: true, schedule, days: [], warning: 'Horario inválido: descanso incompleto' };
-    }
-    if (hasBreak && (!isValidTimeHHmm(breakStart) || !isValidTimeHHmm(breakEnd))) {
-        return { scheduleEnabled: true, schedule, days: [], warning: 'Horario inválido: descanso' };
     }
 
     const rangeStart = startDate ? startOfDayLocal(new Date(startDate)) : (() => {
@@ -151,8 +185,29 @@ async function buildComplianceForEmployee(employeeId, { startDate, endDate } = {
         const dateKey = localDateKey(d);
         const dow = dayStart.getDay();
 
-        const workingDay = daysOfWeek.includes(dow);
+        const daySchedule = getScheduleForDay(schedule, dateKey, dow);
+        const workingDay = Boolean(daySchedule.workingDay);
         const dayLogs = logsByDay.get(dateKey) || [];
+
+        const startTime = daySchedule.start_time;
+        const endTime = daySchedule.end_time;
+        const breakStart = daySchedule.break_start;
+        const breakEnd = daySchedule.break_end;
+        const tolerance = Number.isFinite(Number(daySchedule.tolerance_minutes)) ? Number(daySchedule.tolerance_minutes) : 10;
+
+        if (workingDay && (!isValidTimeHHmm(startTime) || !isValidTimeHHmm(endTime))) {
+            days.push({
+                date: dateKey,
+                workingDay,
+                issues: ['invalid_schedule'],
+                expected: { in: true, out: true, break_start: false, break_end: false },
+                found: { in: null, out: null, break_start: null, break_end: null },
+                warning: 'Horario inválido para este día'
+            });
+            continue;
+        }
+
+        const hasBreak = Boolean(breakStart) && Boolean(breakEnd);
 
         const result = {
             date: dateKey,
@@ -181,8 +236,30 @@ async function buildComplianceForEmployee(employeeId, { startDate, endDate } = {
 
         const chosenIn = pickClosestLog(logsByType.in, expectedIn);
         const chosenOut = pickClosestLog(logsByType.out, expectedOut);
-        const chosenBreakStart = hasBreak ? pickClosestLog(logsByType.break_start, expectedBreakStart) : null;
-        const chosenBreakEnd = hasBreak ? pickClosestLog(logsByType.break_end, expectedBreakEnd) : null;
+        // Turno partido: muchas empresas fichan el descanso como salida/entrada (out/in)
+        // en vez de break_start/break_end. Si hay horario con descanso, aceptamos ambos.
+        const breakStartCandidates = hasBreak ? (
+            logsByType.break_start.concat(
+                logsByType.out.filter(l => {
+                    // La salida de descanso debe ocurrir antes (o cerca) del fin de descanso.
+                    // Así evitamos confundir el OUT de fin de jornada con el de descanso.
+                    return expectedBreakEnd ? (new Date(l.timestamp) <= expectedBreakEnd) : true;
+                })
+            )
+        ) : [];
+
+        const breakEndCandidates = hasBreak ? (
+            logsByType.break_end.concat(
+                logsByType.in.filter(l => {
+                    // La entrada tras descanso debe ocurrir después (o cerca) del inicio de descanso.
+                    // Así evitamos confundir el IN de primera hora con el IN de la tarde.
+                    return expectedBreakStart ? (new Date(l.timestamp) >= expectedBreakStart) : true;
+                })
+            )
+        ) : [];
+
+        const chosenBreakStart = hasBreak ? pickClosestLog(breakStartCandidates, expectedBreakStart) : null;
+        const chosenBreakEnd = hasBreak ? pickClosestLog(breakEndCandidates, expectedBreakEnd) : null;
 
         result.found.in = chosenIn;
         result.found.out = chosenOut;
@@ -279,9 +356,16 @@ router.get('/status', async (req, res) => {
             timestamp: { $gte: startOfDay }
         }).sort({ timestamp: -1 });
 
+        const firstInToday = await Attendance.findOne({
+            employee_id,
+            type: 'in',
+            timestamp: { $gte: startOfDay }
+        }).sort({ timestamp: 1 });
+
         res.json({
             todayStatus: lastRecord ? lastRecord.type : 'none',
-            lastRecord
+            lastRecord,
+            hasInToday: Boolean(firstInToday)
         });
 
     } catch (error) {

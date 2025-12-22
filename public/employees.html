@@ -76,13 +76,16 @@
                         <th>Email</th>
                         <th>Puesto</th>
                         <th>Ubicación</th>
+                        <th>Vac. pendientes</th>
+                        <th>Vac. disfrutadas</th>
+                        <th>Vac. disponibles</th>
                         <th>Estado</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody id="employeesTable">
                     <tr>
-                        <td colspan="8" style="text-align: center; padding: 2rem;">Cargando...</td>
+                        <td colspan="11" style="text-align: center; padding: 2rem;">Cargando...</td>
                     </tr>
                 </tbody>
             </table>
@@ -134,6 +137,40 @@
         let currentPage = 1;
         let currentEmployees = [];
 
+        async function enrichEmployeesWithVacationBalances(employees) {
+            try {
+                if (!Array.isArray(employees) || employees.length === 0) return employees;
+                const year = new Date().getFullYear();
+                const ids = employees.map(e => e && (e._id || e.id)).filter(Boolean);
+                if (ids.length === 0) return employees;
+
+                const balancesRes = await vacationsAPI.getBalances({ year, employee_ids: ids.join(',') });
+                const balances = balancesRes && Array.isArray(balancesRes.balances) ? balancesRes.balances : [];
+
+                const map = new Map();
+                for (const b of balances) {
+                    const empId = b && b.employee && (b.employee.id || b.employee._id);
+                    if (!empId) continue;
+                    map.set(String(empId), b);
+                }
+
+                return employees.map(emp => {
+                    const key = String(emp._id || emp.id || '');
+                    const balance = map.get(key);
+                    const vac = balance && balance.vacation ? balance.vacation : null;
+                    return {
+                        ...emp,
+                        vacation_pending_days: vac ? (vac.pending_days ?? 0) : 0,
+                        vacation_approved_days: vac ? (vac.approved_days ?? 0) : 0,
+                        vacation_remaining_days: vac ? (vac.remaining_after_approved ?? 0) : 0
+                    };
+                });
+            } catch (e) {
+                console.warn('No se pudieron cargar saldos de vacaciones:', e);
+                return employees;
+            }
+        }
+
         async function loadEmployees() {
             const search = document.getElementById('searchInput').value;
             const location = document.getElementById('locationFilter').value;
@@ -143,8 +180,8 @@
             const data = await employeesAPI.getAll(params);
 
             if (data) {
-                currentEmployees = data.employees;
-                renderEmployees(data.employees);
+                currentEmployees = await enrichEmployeesWithVacationBalances(data.employees);
+                renderEmployees(currentEmployees);
                 renderPagination(data.pagination);
             }
         }
@@ -180,7 +217,7 @@
             // Ordenar por ubicación (Tienda)
             const sorted = [...filteredEmployees].sort((a, b) => a.location.localeCompare(b.location));
 
-            const columns = ['Nombre', 'DNI', 'Teléfono', 'Email', 'Puesto', 'Tienda', 'Estado'];
+            const columns = ['Nombre', 'DNI', 'Teléfono', 'Email', 'Puesto', 'Tienda', 'Vac. pendientes', 'Vac. disfrutadas', 'Vac. disponibles', 'Estado'];
             const rows = sorted.map(e => [
                 e.full_name,
                 e.dni,
@@ -188,6 +225,9 @@
                 e.email || '-',
                 e.position,
                 e.location,
+                e.vacation_pending_days ?? 0,
+                e.vacation_approved_days ?? 0,
+                e.vacation_remaining_days ?? 0,
                 e.status === 'active' ? 'Activo' : e.status === 'inactive' ? 'Inactivo' : 'Baja'
             ]);
 
@@ -202,7 +242,7 @@
         function renderEmployees(employees) {
             const tbody = document.getElementById('employeesTable');
             if (employees.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">No se encontraron trabajadores</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 2rem;">No se encontraron trabajadores</td></tr>';
                 return;
             }
 
@@ -214,6 +254,9 @@
                     <td>${emp.email || '-'}</td>
                     <td>${emp.position}</td>
                     <td>${emp.location}</td>
+                    <td><strong>${emp.vacation_pending_days ?? 0}</strong></td>
+                    <td><strong>${emp.vacation_approved_days ?? 0}</strong></td>
+                    <td><strong>${emp.vacation_remaining_days ?? 0}</strong></td>
                     <td>
                         <span class="badge badge-${emp.status === 'active' ? 'success' : emp.status === 'inactive' ? 'error' : 'warning'}">
                             ${emp.status === 'active' ? 'Activo' : emp.status === 'inactive' ? 'Inactivo' : 'De baja'}

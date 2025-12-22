@@ -100,6 +100,36 @@
                     </div>
                 </div>
 
+                <div id="vacationSummaryCard" class="card" style="display:none; margin-top: var(--spacing-lg); padding: 1.25rem;">
+                    <div style="display:flex; justify-content: space-between; align-items:center; gap: 1rem; flex-wrap: wrap;">
+                        <div>
+                            <h3 style="margin: 0;">🏖️ Vacaciones (año <span id="vacBalanceYear"></span>)</h3>
+                            <p style="color: var(--text-muted); margin: 0.35rem 0 0 0; font-size: 0.85rem;">Resumen para control rápido.</p>
+                        </div>
+                        <div style="display:flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
+                            <div style="text-align:right;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Asignadas</div>
+                                <div style="font-weight: 700;" id="vacAllowance">-</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Disfrutadas</div>
+                                <div style="font-weight: 700;" id="vacApproved">-</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Pendientes</div>
+                                <div style="font-weight: 700;" id="vacPending">-</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Disponibles</div>
+                                <div style="font-weight: 700; color: var(--primary-light);" id="vacRemaining">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 0.75rem; margin: 0.75rem 0 0 0;">
+                        “Disponibles” = asignadas − disfrutadas (aprobadas).
+                    </p>
+                </div>
+
                 <div class="card"
                     style="background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--primary); margin-top: var(--spacing-lg);">
                     <h3 style="margin-bottom: var(--spacing-md);">🔐 Acceso para Empleado (App Móvil/Tablet)</h3>
@@ -184,6 +214,23 @@
                         document.getElementById('enableAccess').checked = true;
                         document.getElementById('username').value = access.username;
                         toggleAccessFields();
+                    }
+
+                    // Resumen de vacaciones (si el usuario tiene acceso a Vacaciones)
+                    try {
+                        const year = new Date().getFullYear();
+                        document.getElementById('vacBalanceYear').textContent = year;
+                        const balance = await vacationsAPI.getBalance({ employee_id: employeeId, year });
+                        if (balance && balance.vacation) {
+                            document.getElementById('vacAllowance').textContent = balance.vacation.allowance_days ?? '-';
+                            document.getElementById('vacApproved').textContent = balance.vacation.approved_days ?? 0;
+                            document.getElementById('vacPending').textContent = balance.vacation.pending_days ?? 0;
+                            document.getElementById('vacRemaining').textContent = balance.vacation.remaining_after_approved ?? 0;
+                            document.getElementById('vacationSummaryCard').style.display = 'block';
+                        }
+                    } catch (e) {
+                        // Sin acceso o error: simplemente no mostramos el resumen
+                        console.warn('No se pudo cargar el resumen de vacaciones:', e);
                     }
                 } else {
                     showAlert('No se pudo encontrar el trabajador', 'error');

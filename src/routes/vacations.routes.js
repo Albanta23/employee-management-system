@@ -114,10 +114,47 @@ router.get('/balances', async (req, res) => {
 
         const year = parseYear(req.query.year);
 
-        let employeesQuery = { status: 'active' };
+        const { employee_ids, status, location } = req.query;
+        const employeesQuery = {};
+
+        // Por defecto, el endpoint histórico devolvía solo activos.
+        // Mantenemos ese comportamiento si no se especifica nada.
+        if (status) {
+            employeesQuery.status = String(status);
+        } else if (!employee_ids) {
+            employeesQuery.status = 'active';
+        }
+
+        if (location) {
+            employeesQuery.location = String(location);
+        }
+
+        if (employee_ids) {
+            const ids = String(employee_ids)
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean);
+
+            // Evitar consultas excesivas por URL muy grande
+            const cappedIds = ids.slice(0, 1000);
+            employeesQuery._id = { $in: cappedIds };
+        }
+
         if (isStoreCoordinator(req.user)) {
-            const storeLocations = await getStoreLocations();
-            employeesQuery.location = { $in: storeLocations };
+            // Para coordinadores, limitamos al scope permitido.
+            if (employeesQuery._id && employeesQuery._id.$in) {
+                const storeEmployeeIds = await getStoreEmployeeIds();
+                const allowed = new Set((storeEmployeeIds || []).map(String));
+                employeesQuery._id.$in = employeesQuery._id.$in.filter(id => allowed.has(String(id)));
+            } else {
+                const storeLocations = await getStoreLocations();
+                employeesQuery.location = { $in: storeLocations };
+
+                // Si además venía un location, lo intersectamos
+                if (location) {
+                    employeesQuery.location = { $in: storeLocations.filter(l => l === String(location)) };
+                }
+            }
         }
 
         const employees = await Employee.find(employeesQuery)

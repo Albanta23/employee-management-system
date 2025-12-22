@@ -265,6 +265,89 @@ router.put('/:id', async (req, res) => {
                 return Boolean(m);
             }
 
+            function isValidDateYYYYMMDD(value) {
+                if (typeof value !== 'string') return false;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+                const d = new Date(`${value}T00:00:00.000Z`);
+                return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+            }
+
+            function normalizeBreakPair(obj, target) {
+                if (obj.break_start !== undefined) {
+                    if (obj.break_start !== '' && !isValidTimeHHmm(obj.break_start)) throw new Error('break_start debe tener formato HH:mm o vacío');
+                    target.break_start = obj.break_start;
+                }
+
+                if (obj.break_end !== undefined) {
+                    if (obj.break_end !== '' && !isValidTimeHHmm(obj.break_end)) throw new Error('break_end debe tener formato HH:mm o vacío');
+                    target.break_end = obj.break_end;
+                }
+
+                const hasBreakStart = Object.prototype.hasOwnProperty.call(target, 'break_start') ? target.break_start : obj.break_start;
+                const hasBreakEnd = Object.prototype.hasOwnProperty.call(target, 'break_end') ? target.break_end : obj.break_end;
+                if ((hasBreakStart && !hasBreakEnd) || (!hasBreakStart && hasBreakEnd)) {
+                    throw new Error('Para usar descanso, deben indicarse break_start y break_end');
+                }
+            }
+
+            function normalizeDayOverride(override) {
+                if (!override || typeof override !== 'object') return null;
+                const out = {};
+                if (override.enabled !== undefined) out.enabled = Boolean(override.enabled);
+
+                if (override.start_time !== undefined) {
+                    if (override.start_time !== '' && !isValidTimeHHmm(override.start_time)) throw new Error('day_overrides.start_time debe tener formato HH:mm o vacío');
+                    out.start_time = override.start_time;
+                }
+
+                if (override.end_time !== undefined) {
+                    if (override.end_time !== '' && !isValidTimeHHmm(override.end_time)) throw new Error('day_overrides.end_time debe tener formato HH:mm o vacío');
+                    out.end_time = override.end_time;
+                }
+
+                normalizeBreakPair(override, out);
+
+                // Si el override está habilitado, exigimos start/end no vacíos
+                const enabled = Object.prototype.hasOwnProperty.call(out, 'enabled') ? out.enabled : Boolean(override.enabled);
+                if (enabled === true) {
+                    const st = Object.prototype.hasOwnProperty.call(out, 'start_time') ? out.start_time : override.start_time;
+                    const et = Object.prototype.hasOwnProperty.call(out, 'end_time') ? out.end_time : override.end_time;
+                    if (!st || !et) throw new Error('day_overrides: si enabled=true, start_time y end_time son requeridos');
+                    if (!isValidTimeHHmm(st) || !isValidTimeHHmm(et)) throw new Error('day_overrides: start_time/end_time inválidos');
+                }
+
+                return out;
+            }
+
+            function normalizeDateOverride(item) {
+                if (!item || typeof item !== 'object') throw new Error('date_overrides debe ser un array de objetos');
+                if (!isValidDateYYYYMMDD(item.date)) throw new Error('date_overrides.date debe tener formato YYYY-MM-DD');
+                const out = { date: item.date };
+                if (item.enabled !== undefined) out.enabled = Boolean(item.enabled);
+
+                if (item.start_time !== undefined) {
+                    if (item.start_time !== '' && !isValidTimeHHmm(item.start_time)) throw new Error('date_overrides.start_time debe tener formato HH:mm o vacío');
+                    out.start_time = item.start_time;
+                }
+
+                if (item.end_time !== undefined) {
+                    if (item.end_time !== '' && !isValidTimeHHmm(item.end_time)) throw new Error('date_overrides.end_time debe tener formato HH:mm o vacío');
+                    out.end_time = item.end_time;
+                }
+
+                normalizeBreakPair(item, out);
+
+                const enabled = Object.prototype.hasOwnProperty.call(out, 'enabled') ? out.enabled : true;
+                if (enabled === true) {
+                    const st = Object.prototype.hasOwnProperty.call(out, 'start_time') ? out.start_time : item.start_time;
+                    const et = Object.prototype.hasOwnProperty.call(out, 'end_time') ? out.end_time : item.end_time;
+                    if (!st || !et) throw new Error('date_overrides: si enabled=true, start_time y end_time son requeridos');
+                    if (!isValidTimeHHmm(st) || !isValidTimeHHmm(et)) throw new Error('date_overrides: start_time/end_time inválidos');
+                }
+
+                return out;
+            }
+
             function normalizeSchedule(schedule) {
                 if (!schedule || typeof schedule !== 'object') return null;
 
@@ -305,6 +388,32 @@ router.put('/:id', async (req, res) => {
                     const tol = Number(schedule.tolerance_minutes);
                     if (!Number.isFinite(tol) || tol < 0 || tol > 180) throw new Error('tolerance_minutes debe ser un número entre 0 y 180');
                     normalized.tolerance_minutes = Math.round(tol);
+                }
+
+                if (schedule.day_overrides !== undefined) {
+                    if (!schedule.day_overrides || typeof schedule.day_overrides !== 'object' || Array.isArray(schedule.day_overrides)) {
+                        throw new Error('day_overrides debe ser un objeto');
+                    }
+
+                    const out = {};
+                    for (const [k, v] of Object.entries(schedule.day_overrides)) {
+                        const dow = Number(k);
+                        if (!Number.isInteger(dow) || dow < 0 || dow > 6) continue;
+                        const normalizedOverride = normalizeDayOverride(v);
+                        if (normalizedOverride) out[String(dow)] = normalizedOverride;
+                    }
+                    normalized.day_overrides = out;
+                }
+
+                if (schedule.date_overrides !== undefined) {
+                    if (!Array.isArray(schedule.date_overrides)) throw new Error('date_overrides debe ser un array');
+                    if (schedule.date_overrides.length > 366) throw new Error('date_overrides: máximo 366 elementos');
+
+                    const items = schedule.date_overrides.map(normalizeDateOverride);
+                    // Deduplicar por fecha (última gana)
+                    const byDate = new Map();
+                    for (const it of items) byDate.set(it.date, it);
+                    normalized.date_overrides = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
                 }
 
                 // Validación cruzada mínima de descanso: o vienen ambos o ninguno

@@ -415,11 +415,13 @@
 
         // Control Horario Logic
         let currentStatus = 'none';
+        let hasInToday = false;
 
         async function loadStatus() {
             const data = await attendanceAPI.getStatus();
             if (data) {
                 currentStatus = data.todayStatus;
+                hasInToday = Boolean(data.hasInToday);
                 renderControls();
                 updateStatusBadge(currentStatus);
                 loadHistory();
@@ -452,7 +454,7 @@
             const map = {
                 'none': { label: 'No has fichado hoy', emoji: '⚪', class: 'status-none' },
                 'in': { label: 'En el trabajo', emoji: '🟢', class: 'status-in' },
-                'out': { label: 'Jornada finalizada', emoji: '🔴', class: 'status-none' },
+                'out': { label: 'Fuera del trabajo', emoji: '🔴', class: 'status-none' },
                 'break_start': { label: 'En descanso', emoji: '🟠', class: 'status-break' },
                 'break_end': { label: 'De vuelta del descanso', emoji: '🟢', class: 'status-in' }
             };
@@ -466,9 +468,12 @@
             let buttons = '';
 
             if (currentStatus === 'none' || currentStatus === 'out') {
+                const label = (currentStatus === 'out' && hasInToday)
+                    ? 'REANUDAR JORNADA'
+                    : 'INICIAR JORNADA';
                 buttons = `
                     <button class="btn-fichar btn-in" onclick="fichar('in')" style="grid-column: 1 / span 2;">
-                        <i>📍</i> EMPRENDER JORNADA
+                        <i>📍</i> ${label}
                     </button>
                 `;
             } else if (currentStatus === 'in' || currentStatus === 'break_end') {
@@ -477,7 +482,7 @@
                         <i>☕</i> DESCANSO
                     </button>
                     <button class="btn-fichar btn-out" onclick="fichar('out')">
-                        <i>🏠</i> SALIR
+                        <i>🏁</i> TERMINAR JORNADA
                     </button>
                 `;
             } else if (currentStatus === 'break_start') {

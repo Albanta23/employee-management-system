@@ -234,6 +234,32 @@
                     <input type="number" id="schedule_tolerance" min="0" max="180" step="1" required>
                 </div>
             </div>
+
+            <div class="info-row">
+                <span class="info-label">Sábado (opcional)</span>
+                <div class="info-value" style="display:grid; gap:0.5rem;">
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" id="schedule_sat_enabled">
+                        <span style="font-size: 0.9rem;">Horario especial solo los sábados</span>
+                    </label>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <input type="time" id="schedule_sat_start" placeholder="Entrada">
+                        <input type="time" id="schedule_sat_end" placeholder="Salida">
+                    </div>
+                    <small style="color: var(--text-muted);">Ejemplo: 09:00–14:00 (mañana)</small>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Excepciones (puntuales)</span>
+                <div class="info-value">
+                    <div id="schedule-exceptions" style="display:grid; gap: 0.5rem;"></div>
+                    <button type="button" id="add-exception" class="btn btn-secondary" style="margin-top: 0.5rem; width: 100%;">
+                        ➕ Añadir excepción
+                    </button>
+                    <small style="color: var(--text-muted);">Útil para “solo mañana” un día concreto o trabajar un festivo.</small>
+                </div>
+            </div>
         </div>
 
         <button type="submit" class="btn btn-primary" style="width: 100%; padding: 1rem; margin-bottom: 1rem;">
@@ -293,6 +319,17 @@
                 document.getElementById('schedule_break_start').value = ws.break_start || '';
                 document.getElementById('schedule_break_end').value = ws.break_end || '';
                 document.getElementById('schedule_tolerance').value = (ws.tolerance_minutes ?? 10);
+
+                // Sábado (override)
+                const dowOverrides = ws.day_overrides || {};
+                const sat = dowOverrides['6'] || dowOverrides[6] || null;
+                document.getElementById('schedule_sat_enabled').checked = Boolean(sat && sat.enabled === true);
+                document.getElementById('schedule_sat_start').value = (sat && sat.start_time) ? sat.start_time : '';
+                document.getElementById('schedule_sat_end').value = (sat && sat.end_time) ? sat.end_time : '';
+
+                // Excepciones por fecha
+                scheduleDateOverrides = Array.isArray(ws.date_overrides) ? ws.date_overrides.slice() : [];
+                renderDateOverrides();
 
                 const days = Array.isArray(ws.days_of_week) ? ws.days_of_week.map(Number) : [1, 2, 3, 4, 5];
                 document.querySelectorAll('.schedule-day').forEach(cb => {
@@ -377,6 +414,17 @@
                 .filter(cb => cb.checked)
                 .map(cb => Number(cb.value));
 
+            const day_overrides = {};
+            if (document.getElementById('schedule_sat_enabled').checked) {
+                day_overrides['6'] = {
+                    enabled: true,
+                    start_time: document.getElementById('schedule_sat_start').value,
+                    end_time: document.getElementById('schedule_sat_end').value,
+                    break_start: '',
+                    break_end: ''
+                };
+            }
+
             const work_schedule = {
                 enabled: document.getElementById('schedule_enabled').checked,
                 days_of_week: days,
@@ -384,7 +432,9 @@
                 end_time: document.getElementById('schedule_end').value,
                 break_start: document.getElementById('schedule_break_start').value || '',
                 break_end: document.getElementById('schedule_break_end').value || '',
-                tolerance_minutes: Number(document.getElementById('schedule_tolerance').value)
+                tolerance_minutes: Number(document.getElementById('schedule_tolerance').value),
+                day_overrides,
+                date_overrides: scheduleDateOverrides
             };
 
             const updatedData = {
@@ -400,6 +450,115 @@
         });
 
         loadProfile();
+
+        // Excepciones por fecha (UI)
+        let scheduleDateOverrides = [];
+
+        function renderDateOverrides() {
+            const container = document.getElementById('schedule-exceptions');
+            if (!container) return;
+
+            if (!scheduleDateOverrides || scheduleDateOverrides.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">Sin excepciones configuradas</div>';
+                return;
+            }
+
+            // Ordenar por fecha
+            const sorted = scheduleDateOverrides.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+            container.innerHTML = sorted.map((it, idx) => {
+                const date = it.date || '';
+                const enabled = it.enabled !== false;
+                const start = it.start_time || '';
+                const end = it.end_time || '';
+                const bs = it.break_start || '';
+                const be = it.break_end || '';
+
+                return `
+                    <div data-idx="${idx}" style="padding: 0.75rem; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; display: grid; gap: 0.5rem;">
+                        <div style="display:grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items:center;">
+                            <input type="date" value="${date}" class="ex-date" style="width: 100%;">
+                            <button type="button" class="btn btn-secondary ex-del" style="padding: 0.5rem 0.75rem;">🗑️</button>
+                        </div>
+                        <label style="display:flex; align-items:center; gap:0.5rem;">
+                            <input type="checkbox" class="ex-enabled" ${enabled ? 'checked' : ''}>
+                            <span style="font-size: 0.9rem;">Día laborable</span>
+                        </label>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                            <input type="time" value="${start}" class="ex-start" placeholder="Entrada">
+                            <input type="time" value="${end}" class="ex-end" placeholder="Salida">
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                            <input type="time" value="${bs}" class="ex-bs" placeholder="Descanso inicio">
+                            <input type="time" value="${be}" class="ex-be" placeholder="Descanso fin">
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Re-map para mantener índices coherentes con el array original
+            const rows = Array.from(container.querySelectorAll('[data-idx]'));
+            rows.forEach((row) => {
+                const dateEl = row.querySelector('.ex-date');
+                const enabledEl = row.querySelector('.ex-enabled');
+                const startEl = row.querySelector('.ex-start');
+                const endEl = row.querySelector('.ex-end');
+                const bsEl = row.querySelector('.ex-bs');
+                const beEl = row.querySelector('.ex-be');
+                const delEl = row.querySelector('.ex-del');
+
+                function sync() {
+                    const date = dateEl.value;
+                    // localizar el elemento por fecha si existe, si no por posición
+                    const idx = scheduleDateOverrides.findIndex(x => x && x.date === date);
+                    const targetIndex = idx >= 0 ? idx : scheduleDateOverrides.findIndex(x => x && x.date === (row.querySelector('.ex-date')?.defaultValue || ''));
+                    const i = targetIndex >= 0 ? targetIndex : scheduleDateOverrides.findIndex(x => x && x.date === date) ;
+                    const target = i >= 0 ? scheduleDateOverrides[i] : null;
+
+                    // Si el usuario cambia la fecha, actualizamos el registro (simple)
+                    const next = {
+                        date,
+                        enabled: enabledEl.checked,
+                        start_time: startEl.value,
+                        end_time: endEl.value,
+                        break_start: bsEl.value || '',
+                        break_end: beEl.value || ''
+                    };
+
+                    if (target) {
+                        Object.assign(target, next);
+                    } else {
+                        scheduleDateOverrides.push(next);
+                    }
+                }
+
+                [dateEl, enabledEl, startEl, endEl, bsEl, beEl].forEach(el => {
+                    if (!el) return;
+                    el.addEventListener('change', sync);
+                });
+
+                if (delEl) {
+                    delEl.addEventListener('click', () => {
+                        const date = dateEl.value;
+                        scheduleDateOverrides = scheduleDateOverrides.filter(x => x && x.date !== date);
+                        renderDateOverrides();
+                    });
+                }
+            });
+        }
+
+        document.getElementById('add-exception')?.addEventListener('click', () => {
+            const today = new Date().toISOString().slice(0, 10);
+            scheduleDateOverrides.push({
+                date: today,
+                enabled: true,
+                start_time: document.getElementById('schedule_start').value || '09:00',
+                end_time: document.getElementById('schedule_end').value || '18:00',
+                break_start: document.getElementById('schedule_break_start').value || '',
+                break_end: document.getElementById('schedule_break_end').value || ''
+            });
+            renderDateOverrides();
+        });
     </script>
 </body>
 

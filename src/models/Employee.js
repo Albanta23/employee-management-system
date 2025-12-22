@@ -27,7 +27,34 @@ const EmployeeSchema = new mongoose.Schema({
         // Descanso opcional (si se usan, deben venir ambos)
         break_start: { type: String, default: '' },
         break_end: { type: String, default: '' },
-        tolerance_minutes: { type: Number, default: 10 }
+        tolerance_minutes: { type: Number, default: 10 },
+
+        // Overrides opcionales por día de semana (0..6). Útil para sábados solo mañana, etc.
+        // Ej: day_overrides[6] = { enabled: true, start_time: '09:00', end_time: '14:00', break_start: '', break_end: '' }
+        day_overrides: {
+            type: Map,
+            of: new mongoose.Schema({
+                enabled: { type: Boolean },
+                start_time: { type: String },
+                end_time: { type: String },
+                break_start: { type: String },
+                break_end: { type: String }
+            }, { _id: false }),
+            default: {}
+        },
+
+        // Excepciones puntuales por fecha (YYYY-MM-DD). Tienen prioridad sobre day_overrides.
+        date_overrides: {
+            type: [new mongoose.Schema({
+                date: { type: String, required: true },
+                enabled: { type: Boolean, default: true },
+                start_time: { type: String },
+                end_time: { type: String },
+                break_start: { type: String },
+                break_end: { type: String }
+            }, { _id: false })],
+            default: []
+        }
     }
 }, { timestamps: true });
 
