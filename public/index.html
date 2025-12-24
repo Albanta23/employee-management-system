@@ -179,8 +179,19 @@
             autocomplete="current-password" />
         </div>
 
+        <div class="form-group" id="biometricOptInContainer" style="display:none; margin-top: var(--spacing-md);">
+          <label class="form-label" style="display:flex; align-items:center; gap: var(--spacing-sm); margin-bottom: 0;">
+            <input type="checkbox" id="enableBiometric" />
+            Usar huella/cara en este dispositivo
+          </label>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-login">
           Iniciar Sesión
+        </button>
+
+        <button type="button" id="biometricLoginBtn" class="btn btn-secondary btn-login" style="display:none; margin-top: var(--spacing-md);">
+          Entrar con huella/cara
         </button>
       </form>
 
@@ -192,7 +203,16 @@
 
   <script src="js/api.js"></script>
   <script src="js/branding.js"></script>
+  <script src="js/biometric-loader.js"></script>
+  <script src="js/biometric-auth.js"></script>
   <script>
+    // Inicializar UI biométrica (solo visible en app nativa y si está disponible)
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.BiometricAuth && typeof window.BiometricAuth.initLoginPage === 'function') {
+        window.BiometricAuth.initLoginPage();
+      }
+    });
+
     document
       .getElementById("loginForm")
       .addEventListener("submit", async (e) => {
@@ -233,6 +253,19 @@
           // Proceder con login normal
           localStorage.setItem("token", data.token);
           localStorage.setItem("user", JSON.stringify(data.user));
+
+          // Guardar credenciales para biometría si el usuario lo activa (solo app nativa)
+          try {
+            const enableBiometric = document.getElementById('enableBiometric');
+            if (enableBiometric && enableBiometric.checked && window.BiometricAuth) {
+              const canUse = await window.BiometricAuth.canUseBiometrics();
+              if (canUse) {
+                await window.BiometricAuth.saveCredentials(data.token, data.user);
+              }
+            }
+          } catch (_) {
+            // Silencioso: el login normal debe seguir funcionando aunque falle biometría.
+          }
 
           alertContainer.innerHTML = `
               <div class="alert alert-success fade-in">
