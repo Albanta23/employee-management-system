@@ -17,12 +17,25 @@
           ? window.Capacitor.registerPlugin
           : null;
 
-      if (!registerPlugin) return false;
+      // 1) Preferido: proxy creado con registerPlugin.
+      if (registerPlugin) {
+        // Creamos el proxy JS para el plugin nativo instalado.
+        // No dependemos de CDN/bundler.
+        window.NativeBiometric = registerPlugin('NativeBiometric');
+        return true;
+      }
 
-      // Creamos el proxy JS para el plugin nativo instalado.
-      // No dependemos de CDN/bundler.
-      window.NativeBiometric = registerPlugin('NativeBiometric');
-      return true;
+      // 2) Fallback (compatibilidad): algunos runtimes exponen plugins ya montados aquí.
+      const legacy = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeBiometric
+        ? window.Capacitor.Plugins.NativeBiometric
+        : null;
+
+      if (legacy) {
+        window.NativeBiometric = legacy;
+        return true;
+      }
+
+      return false;
     } catch (_) {
       return false;
     }

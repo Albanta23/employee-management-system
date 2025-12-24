@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
+const { authenticateToken } = require('../middleware/auth');
 require('dotenv').config();
 
 function normalizeDni(value) {
@@ -168,6 +169,48 @@ router.post('/change-password', verifyChangeToken, async (req, res) => {
             return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
         }
         res.status(500).json({ error: 'Error en el servidor al cambiar la contraseña.' });
+    }
+});
+
+// Validar sesión actual (token) y devolver el usuario
+router.get('/me', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user && (req.user.id || req.user._id) ? String(req.user.id || req.user._id) : null;
+        if (!userId) {
+            return res.status(401).json({ error: 'Token inválido' });
+        }
+
+        const dbUser = await withTimeout(
+            User.findById(userId).select('username name email role employee_id mustChangePassword').maxTimeMS(5000),
+            5500,
+            'User.findById (me)'
+        );
+
+        if (!dbUser) {
+            return res.status(401).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Si por alguna razón vuelve a requerir cambio de contraseña, forzamos re-login normal
+        if (dbUser.mustChangePassword) {
+            return res.status(403).json({ error: 'Se requiere cambiar el código de acceso' });
+        }
+
+        res.json({
+            user: {
+                id: dbUser._id,
+                username: dbUser.username,
+                name: dbUser.name,
+                email: dbUser.email,
+                role: dbUser.role || 'admin',
+                employee_id: dbUser.employee_id || null
+            }
+        });
+    } catch (error) {
+        console.error('Error en /me:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        res.status(500).json({ error: 'Error en el servidor' });
     }
 });
 

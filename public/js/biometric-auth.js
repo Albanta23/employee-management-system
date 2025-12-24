@@ -35,6 +35,12 @@
   function getNativeBiometric() {
     // Preferimos el proxy registrado localmente (sin CDN).
     if (window.NativeBiometric) return window.NativeBiometric;
+
+    // Compatibilidad: algunos runtimes exponen el plugin directamente.
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeBiometric) {
+      return window.Capacitor.Plugins.NativeBiometric;
+    }
+
     // Compatibilidad con el formato UMD antiguo.
     return window.capacitorCapacitorBiometric && window.capacitorCapacitorBiometric.NativeBiometric
       ? window.capacitorCapacitorBiometric.NativeBiometric
@@ -100,6 +106,48 @@
     });
   }
 
+  async function validateTokenWithServer(token) {
+    // En web puede no existir API_URL (dependiendo de cómo se carguen scripts), así que lo tratamos como opcional.
+    try {
+      // eslint-disable-next-line no-undef
+      const baseUrl = typeof API_URL === 'string' && API_URL ? API_URL : null;
+      if (!baseUrl) return null;
+
+      const response = await fetch(`${baseUrl}/auth/me`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${String(token || '')}`
+        }
+      });
+
+      if (!response.ok) {
+        let errText = '';
+        try {
+          const ct = response.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const data = await response.json();
+            errText = (data && data.error) ? String(data.error) : '';
+          } else {
+            errText = String((await response.text()) || '');
+          }
+        } catch (_) {
+          errText = '';
+        }
+
+        const msg = errText || (response.status === 401 ? 'Token inválido o expirado' : `Error ${response.status}`);
+        const e = new Error(msg);
+        e.status = response.status;
+        throw e;
+      }
+
+      const data = await response.json();
+      return data && data.user ? data.user : null;
+    } catch (e) {
+      throw e;
+    }
+  }
+
   async function biometricLogin() {
     await ensurePluginLoaded();
     const NativeBiometric = getNativeBiometric();
@@ -122,7 +170,19 @@
 
     if (!token) throw new Error('No hay sesión guardada para biometría');
 
-    if (!user || typeof user !== 'object') {
+    // Validamos el token contra el servidor para evitar entrar con tokens expirados
+    // (si no se valida, el dashboard haría 401 y te devolvería al login).
+    let serverUser = null;
+    try {
+      serverUser = await validateTokenWithServer(token);
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'Token inválido o expirado';
+      throw new Error(`Sesión biométrica no válida. Inicia sesión normal y vuelve a activar biometría. (${msg})`);
+    }
+
+    if (serverUser && typeof serverUser === 'object') {
+      user = serverUser;
+    } else if (!user || typeof user !== 'object') {
       const payload = decodeJwtPayload(token) || {};
       user = {
         id: payload.id,
@@ -186,6 +246,7 @@
     canUseBiometrics,
     isBiometricLoginConfigured,
     saveCredentials,
+    validateTokenWithServer,
     biometricLogin,
     initLoginPage
   };
