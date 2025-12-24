@@ -12,6 +12,49 @@ const reportsUtil = {
     },
 
     /**
+     * Guarda/abre el PDF de forma compatible con WebViews (Capacitor / navegadores embebidos)
+     * En WebView, los mecanismos de descarga suelen fallar; se abre el PDF para que el usuario lo guarde/comparta.
+     */
+    savePdf: async (doc, fileName) => {
+        const safeFileName = (fileName || 'documento.pdf').toString().replace(/[^\w\-.]+/g, '_');
+
+        const ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
+        const isCapacitor = !!(window.Capacitor && typeof window.Capacitor.getPlatform === 'function' && window.Capacitor.getPlatform() !== 'web');
+        const isAndroidWebView = /;\s*wv\)/i.test(ua) || /\bwv\b/i.test(ua);
+        const isEmbeddedBrowser = isCapacitor || isAndroidWebView;
+
+        // En navegador "normal" preferimos descarga directa.
+        if (!isEmbeddedBrowser) {
+            doc.save(safeFileName);
+            return;
+        }
+
+        // En WebView intentamos abrir el PDF (más compatible que descargar).
+        try {
+            const blob = doc.output('blob');
+            const blobUrl = URL.createObjectURL(blob);
+
+            // Algunos WebViews bloquean popups: probamos primero nueva pestaña, si falla, misma vista.
+            const opened = window.open(blobUrl, '_blank');
+            if (!opened) {
+                window.location.assign(blobUrl);
+            }
+
+            // Revocar cuando ya no sea necesario (best-effort)
+            setTimeout(() => {
+                try { URL.revokeObjectURL(blobUrl); } catch (_) { }
+            }, 60 * 1000);
+        } catch (e) {
+            console.warn('Fallo al abrir PDF en WebView, usando doc.save como fallback', e);
+            try {
+                doc.save(safeFileName);
+            } catch (e2) {
+                alert('No se pudo generar/abrir el PDF en este navegador. Prueba desde Chrome/Safari o desde un PC.');
+            }
+        }
+    },
+
+    /**
      * Genera un justificante individual profesional
      */
     // Cargar configuración desde el servidor si es posible
@@ -145,7 +188,11 @@ const reportsUtil = {
         doc.text(footerText, 105, footerY, { align: 'center', maxWidth: 180 });
 
         reportsUtil.addWatermark(doc);
-        doc.save(`Justificante_${(data.full_name || 'Empleado').replace(/\s/g, '_')}.pdf`);
+
+        await reportsUtil.savePdf(
+            doc,
+            `Justificante_${(data.full_name || 'Empleado').replace(/\s/g, '_')}.pdf`
+        );
     },
 
     /**
@@ -196,7 +243,11 @@ const reportsUtil = {
         });
 
         reportsUtil.addWatermark(doc);
-        doc.save(`${fileName}_${new Date().toISOString().split('T')[0]}.pdf`);
+
+        await reportsUtil.savePdf(
+            doc,
+            `${fileName}_${new Date().toISOString().split('T')[0]}.pdf`
+        );
     },
 
     /**
@@ -293,7 +344,7 @@ const reportsUtil = {
             doc.text(footer, 105, 290, { align: 'center' });
         }
 
-        doc.save(`${fileName}.pdf`);
+        await reportsUtil.savePdf(doc, `${fileName}.pdf`);
     },
 
     /**
