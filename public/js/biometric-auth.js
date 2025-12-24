@@ -145,16 +145,33 @@
     if (optInContainer) optInContainer.style.display = 'none';
     if (biometricBtn) biometricBtn.style.display = 'none';
 
-    const available = await canUseBiometrics();
-    if (!available) return;
+    // En app nativa: renderizamos siempre la UI biométrica.
+    // Hacemos las comprobaciones al pulsar el botón para evitar que errores de plugin/bridge escondan el botón.
+    if (!isNativeCapacitor()) return;
 
     if (optInContainer) optInContainer.style.display = '';
 
-    const configured = await isBiometricLoginConfigured();
-    if (configured && biometricBtn) {
+    if (biometricBtn) {
       biometricBtn.style.display = '';
+
+      // Evita duplicar listeners si initLoginPage se ejecuta más de una vez.
+      if (biometricBtn.dataset.bound === 'true') return;
+      biometricBtn.dataset.bound = 'true';
+
       biometricBtn.addEventListener('click', async () => {
         try {
+          const available = await canUseBiometrics();
+          if (!available) {
+            showInlineAlert('Biometría no disponible en este dispositivo (o no está inicializada).', 'error');
+            return;
+          }
+
+          const configured = await isBiometricLoginConfigured();
+          if (!configured) {
+            showInlineAlert('Aún no hay sesión biométrica guardada. Inicia sesión y activa “Usar huella/cara en este dispositivo”.', 'error');
+            return;
+          }
+
           const user = await biometricLogin();
           showInlineAlert('Inicio de sesión con biometría exitoso. Redirigiendo...', 'success');
           setTimeout(() => {
