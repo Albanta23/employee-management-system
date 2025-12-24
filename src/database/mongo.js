@@ -31,7 +31,7 @@ const connectDB = async () => {
 
         cached.promise = mongoose.connect(process.env.MONGODB_URI, opts)
             .then((mongoose) => {
-                console.log(`✓ MongoDB Conectado: ${mongoose.connection.host}`);
+                console.log(`✓ MongoDB Conectado: ${mongoose.connection.host} (db: ${mongoose.connection.name})`);
                 return mongoose;
             });
     }
