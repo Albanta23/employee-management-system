@@ -10,6 +10,7 @@
     "migrate-to-mongo": "node scripts/migrate-to-mongo.js",
     "generate-employee-logins": "node scripts/generate-employee-logins.js",
     "sync-mongo-users": "node scripts/sync-mongo-users.js",
+    "reset-password:mongo": "node scripts/reset-mongo-user-password.js",
     "change-password": "node scripts/change-password.js",
     "backup": "node scripts/backup.js",
     "backup:mongo": "node scripts/backup.js --type=mongo --verify=true",
