@@ -9,29 +9,26 @@
     }
   }
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const existing = document.querySelector(`script[data-biometric-plugin="true"][src="${src}"]`);
-      if (existing) {
-        resolve(true);
-        return;
-      }
+  function registerNativeBiometric() {
+    try {
+      const registerPlugin = (window.capacitorExports && window.capacitorExports.registerPlugin)
+        ? window.capacitorExports.registerPlugin
+        : (window.Capacitor && typeof window.Capacitor.registerPlugin === 'function')
+          ? window.Capacitor.registerPlugin
+          : null;
 
-      const script = document.createElement('script');
-      script.src = src;
-      script.async = true;
-      script.dataset.biometricPlugin = 'true';
-      script.onload = () => resolve(true);
-      script.onerror = () => reject(new Error('No se pudo cargar el plugin biométrico'));
-      document.head.appendChild(script);
-    });
+      if (!registerPlugin) return false;
+
+      // Creamos el proxy JS para el plugin nativo instalado.
+      // No dependemos de CDN/bundler.
+      window.NativeBiometric = registerPlugin('NativeBiometric');
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  // Pin de versión para evitar cambios inesperados en runtime.
-  // Nota: se carga desde CDN porque el proyecto no usa bundler.
-  const PLUGIN_URL = 'https://cdn.jsdelivr.net/npm/@capgo/capacitor-native-biometric@8.0.3/dist/plugin.js';
-
   window.__nativeBiometricReady = isNativeCapacitor()
-    ? loadScript(PLUGIN_URL).catch(() => false)
+    ? Promise.resolve(registerNativeBiometric())
     : Promise.resolve(false);
 })();

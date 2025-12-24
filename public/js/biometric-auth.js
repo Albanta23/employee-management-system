@@ -33,7 +33,9 @@
   }
 
   function getNativeBiometric() {
-    // El plugin expone `capacitorCapacitorBiometric.NativeBiometric` en formato UMD.
+    // Preferimos el proxy registrado localmente (sin CDN).
+    if (window.NativeBiometric) return window.NativeBiometric;
+    // Compatibilidad con el formato UMD antiguo.
     return window.capacitorCapacitorBiometric && window.capacitorCapacitorBiometric.NativeBiometric
       ? window.capacitorCapacitorBiometric.NativeBiometric
       : null;

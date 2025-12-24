@@ -1,6 +1,26 @@
-const API_URL = window.location.origin.includes('localhost')
-    ? 'http://localhost:3000/api'
-    : '/api';
+function isNativeCapacitor() {
+    try {
+        return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+    } catch (_) {
+        return false;
+    }
+}
+
+// En web: usamos '/api' (mismo dominio) excepto en local.
+// En app nativa: el origen es 'capacitor://localhost' y '/api' NO apunta al backend.
+// Permitimos override por localStorage y dejamos un fallback al dominio de producción.
+const API_URL = (() => {
+    const override = localStorage.getItem('API_URL_OVERRIDE');
+    if (override && String(override).trim()) return String(override).trim();
+
+    if (isNativeCapacitor()) {
+        return 'https://employee-management-system-xi-swart.vercel.app/api';
+    }
+
+    return window.location.origin.includes('localhost')
+        ? 'http://localhost:3000/api'
+        : '/api';
+})();
 
 // Obtener token del localStorage
 function getToken() {
