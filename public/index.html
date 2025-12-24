@@ -263,10 +263,22 @@
               const canUse = await window.BiometricAuth.canUseBiometrics();
               if (canUse) {
                 await window.BiometricAuth.saveCredentials(data.token, data.user);
+                // Feedback (no bloqueante): si se guardó, el usuario entenderá que ya puede usar huella.
+                alertContainer.innerHTML = `
+                    <div class="alert alert-success fade-in">
+                        ✓ Sesión guardada para huella/cara en este dispositivo.
+                    </div>
+                `;
               }
             }
-          } catch (_) {
-            // Silencioso: el login normal debe seguir funcionando aunque falle biometría.
+          } catch (e) {
+            // No bloqueamos el login normal, pero avisamos para evitar confusión.
+            const msg = e && e.message ? String(e.message) : 'No se pudieron guardar credenciales para biometría.';
+            alertContainer.innerHTML = `
+                <div class="alert alert-error fade-in">
+                    ✗ ${msg}
+                </div>
+            `;
           }
 
           alertContainer.innerHTML = `

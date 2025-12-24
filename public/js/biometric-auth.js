@@ -47,10 +47,29 @@
       : null;
   }
 
-  function getServerKey() {
+  function getPrimaryServerKey() {
+    // Clave estable para evitar que cambie entre entornos (p.ej. capacitor://localhost).
+    // Si se cambia en el futuro, hay que mantener fallback para no “perder” credenciales.
     return (window.BIOMETRIC_SERVER_KEY && String(window.BIOMETRIC_SERVER_KEY))
-      || window.location.host
       || 'employee-management-system';
+  }
+
+  function getLegacyServerKey() {
+    // Compatibilidad: versiones anteriores usaban el host como server (en nativo suele ser 'localhost').
+    return window.location && window.location.host ? String(window.location.host) : 'localhost';
+  }
+
+  async function getSavedCredentialsWithFallback(NativeBiometric) {
+    // Intenta la clave “nueva” primero; si no existe, prueba legacy.
+    try {
+      return await NativeBiometric.getCredentials({ server: getPrimaryServerKey() });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message).toLowerCase() : '';
+      if (msg.includes('no credentials') || msg.includes('not found') || msg.includes('no se encontraron')) {
+        return await NativeBiometric.getCredentials({ server: getLegacyServerKey() });
+      }
+      throw e;
+    }
   }
 
   function decodeJwtPayload(token) {
@@ -85,8 +104,10 @@
     if (!NativeBiometric) return false;
 
     try {
-      const result = await NativeBiometric.isCredentialsSaved({ server: getServerKey() });
-      return !!(result && result.isSaved);
+      const primary = await NativeBiometric.isCredentialsSaved({ server: getPrimaryServerKey() });
+      if (primary && primary.isSaved) return true;
+      const legacy = await NativeBiometric.isCredentialsSaved({ server: getLegacyServerKey() });
+      return !!(legacy && legacy.isSaved);
     } catch (_) {
       return false;
     }
@@ -100,7 +121,7 @@
     // Guardamos token + user en el almacén seguro del dispositivo.
     // Nota: el plugin usa campos `username`/`password`; aquí los reutilizamos como strings.
     await NativeBiometric.setCredentials({
-      server: getServerKey(),
+      server: getPrimaryServerKey(),
       username: String(token || ''),
       password: JSON.stringify(user || {})
     });
@@ -158,7 +179,16 @@
       title: 'Iniciar sesión',
     });
 
-    const credentials = await NativeBiometric.getCredentials({ server: getServerKey() });
+    let credentials;
+    try {
+      credentials = await getSavedCredentialsWithFallback(NativeBiometric);
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : '';
+      if (msg.toLowerCase().includes('no credentials')) {
+        throw new Error('No hay sesión guardada para biometría');
+      }
+      throw e;
+    }
     const token = credentials && credentials.username ? String(credentials.username) : '';
 
     let user = null;
