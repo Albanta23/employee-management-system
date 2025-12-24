@@ -21,8 +21,8 @@
     "seed-locations-from-employees": "node scripts/seed-locations-from-employees.js",
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android",
-    "android:apk": "cd android && ./gradlew assembleDebug",
-    "android:aab": "cd android && ./gradlew bundleRelease"
+    "android:apk": "npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:aab": "npx cap sync android && cd android && ./gradlew bundleRelease"
   },
   "keywords": [
     "employee",

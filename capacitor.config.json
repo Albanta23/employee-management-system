@@ -1,9 +1,5 @@
 {
   "appId": "com.example.employeemanagement",
   "appName": "Employee Management",
-  "webDir": "public",
-  "server": {
-    "url": "https://employee-management-system-xi-swart.vercel.app/",
-    "cleartext": false
-  }
+  "webDir": "public"
 }
