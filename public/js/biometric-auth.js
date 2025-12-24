@@ -160,18 +160,6 @@
 
       biometricBtn.addEventListener('click', async () => {
         try {
-          const available = await canUseBiometrics();
-          if (!available) {
-            showInlineAlert('Biometría no disponible en este dispositivo (o no está inicializada).', 'error');
-            return;
-          }
-
-          const configured = await isBiometricLoginConfigured();
-          if (!configured) {
-            showInlineAlert('Aún no hay sesión biométrica guardada. Inicia sesión y activa “Usar huella/cara en este dispositivo”.', 'error');
-            return;
-          }
-
           const user = await biometricLogin();
           showInlineAlert('Inicio de sesión con biometría exitoso. Redirigiendo...', 'success');
           setTimeout(() => {
@@ -182,8 +170,12 @@
             }
           }, 500);
         } catch (e) {
-          const msg = e && e.message ? e.message : 'No se pudo iniciar sesión con biometría';
-          showInlineAlert(msg, 'error');
+          const msg = e && e.message ? String(e.message) : 'No se pudo iniciar sesión con biometría';
+          if (msg.toLowerCase().includes('no hay sesión guardada')) {
+            showInlineAlert('No hay sesión biométrica guardada todavía. Inicia sesión normal y activa “Usar huella/cara en este dispositivo”.', 'error');
+          } else {
+            showInlineAlert(msg, 'error');
+          }
         }
       });
     }
