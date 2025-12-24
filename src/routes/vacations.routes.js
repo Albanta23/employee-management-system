@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const Vacation = require('../models/Vacation');
 const Employee = require('../models/Employee');
+const Absence = require('../models/Absence');
 const { authenticateToken } = require('../middleware/auth');
-const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds } = require('../utils/accessScope');
+const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds, getSettingsForAccess } = require('../utils/accessScope');
+const { logAudit, pick, shallowDiff } = require('../utils/audit');
 
 router.use(authenticateToken);
 
@@ -40,10 +42,238 @@ function parseYear(value) {
     return year;
 }
 
+function parseYearFromReason(reason) {
+    const text = String(reason || '');
+    const match = text.match(/\b(19\d{2}|20\d{2})\b/);
+    if (!match) return null;
+    const y = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(y) || y < 1970 || y > 3000) return null;
+    return y;
+}
+
+function deriveVacationYear({ explicitYear, startDate, reason }) {
+    const fromExplicit = Number.parseInt(String(explicitYear ?? ''), 10);
+    if (Number.isFinite(fromExplicit) && fromExplicit >= 1970 && fromExplicit <= 3000) return fromExplicit;
+
+    const fromReason = parseYearFromReason(reason);
+    if (fromReason) return fromReason;
+
+    const d = startDate instanceof Date ? startDate : new Date(startDate);
+    if (!Number.isNaN(d.getTime())) return d.getUTCFullYear();
+
+    return new Date().getUTCFullYear();
+}
+
 function sumDaysByStatus(items, status) {
     return items
         .filter(v => (v.status || 'pending') === status)
         .reduce((acc, v) => acc + (Number(v.days) || 0), 0);
+}
+
+function parseIsoDateOrNull(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+}
+
+function toDateOnlyString(d) {
+    const date = new Date(d);
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function normalizeVacationPolicy(input) {
+    const out = {
+        proration_enabled: false,
+        proration_rounding_increment: 0.5,
+        carryover_enabled: false,
+        carryover_max_days: 0,
+        carryover_expiry_month_day: '03-31'
+    };
+
+    if (!input || typeof input !== 'object') return out;
+
+    if (Object.prototype.hasOwnProperty.call(input, 'proration_enabled')) {
+        out.proration_enabled = !!input.proration_enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'proration_rounding_increment')) {
+        const inc = Number(input.proration_rounding_increment);
+        out.proration_rounding_increment = (Number.isFinite(inc) && inc > 0) ? inc : out.proration_rounding_increment;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_enabled')) {
+        out.carryover_enabled = !!input.carryover_enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_max_days')) {
+        const max = Number(input.carryover_max_days);
+        out.carryover_max_days = (Number.isFinite(max) && max >= 0) ? max : out.carryover_max_days;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_expiry_month_day')) {
+        const md = String(input.carryover_expiry_month_day || '').trim();
+        // Validación simple: MM-DD
+        if (/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(md)) {
+            out.carryover_expiry_month_day = md;
+        }
+    }
+
+    return out;
+}
+
+function utcMidnight(value) {
+    const d = new Date(value);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function clampDateToRange(date, minDate, maxDate) {
+    const t = date.getTime();
+    if (t < minDate.getTime()) return new Date(minDate);
+    if (t > maxDate.getTime()) return new Date(maxDate);
+    return new Date(date);
+}
+
+function diffDaysInclusiveUtc(startUtcMidnight, endUtcMidnight) {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const start = utcMidnight(startUtcMidnight);
+    const end = utcMidnight(endUtcMidnight);
+    const diff = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY);
+    return diff >= 0 ? (diff + 1) : 0;
+}
+
+function roundToIncrement(value, increment) {
+    const inc = Number(increment);
+    const v = Number(value);
+    if (!Number.isFinite(v)) return 0;
+    if (!Number.isFinite(inc) || inc <= 0) return v;
+    return Math.round(v / inc) * inc;
+}
+
+function computeProratedAnnualAllowanceDays(employee, year, policy) {
+    const annual = Number(employee && employee.annual_vacation_days);
+    const annualDays = Number.isFinite(annual) ? annual : 30;
+
+    if (!policy || !policy.proration_enabled) return annualDays;
+
+    const yearStart = new Date(Date.UTC(year, 0, 1));
+    const yearEnd = new Date(Date.UTC(year, 11, 31));
+
+    const hireDate = employee && employee.hire_date ? utcMidnight(employee.hire_date) : null;
+    const terminationDate = employee && employee.termination_date ? utcMidnight(employee.termination_date) : null;
+
+    let employedStart = yearStart;
+    let employedEnd = yearEnd;
+
+    if (hireDate) {
+        employedStart = clampDateToRange(hireDate, yearStart, yearEnd);
+    }
+    if (terminationDate) {
+        employedEnd = clampDateToRange(terminationDate, yearStart, yearEnd);
+    }
+
+    const totalDaysInYear = diffDaysInclusiveUtc(yearStart, yearEnd);
+    const employedDays = diffDaysInclusiveUtc(employedStart, employedEnd);
+    if (totalDaysInYear <= 0 || employedDays <= 0) return 0;
+
+    const raw = annualDays * (employedDays / totalDaysInYear);
+    const rounded = roundToIncrement(raw, policy.proration_rounding_increment);
+    return Math.max(0, Math.min(annualDays, rounded));
+}
+
+async function findOverlapsForEmployee({ employeeId, employeeLocation, startDate, endDate, requestType, excludeVacationId = null }) {
+    // Solo bloqueamos por solicitudes activas (pendiente/aprobada)
+    const activeStatuses = ['pending', 'approved'];
+
+    const settings = await getSettingsForAccess();
+
+    const locationKey = String(employeeLocation || '').trim();
+    const locationOverride = (settings && settings.overlap_rules_by_location && locationKey)
+        ? (settings.overlap_rules_by_location instanceof Map
+            ? settings.overlap_rules_by_location.get(locationKey)
+            : settings.overlap_rules_by_location[locationKey])
+        : null;
+
+    const overlapRules = locationOverride || (settings && settings.overlap_rules ? settings.overlap_rules : null);
+
+    const categoryFromType = (t) => {
+        const normalized = String(t || '').toLowerCase();
+        if (!normalized || normalized === 'vacation') return 'vacation';
+        return 'permission';
+    };
+    const newCategory = categoryFromType(requestType);
+
+    const rule = (from, to) => {
+        const fallback = true;
+        if (!overlapRules || typeof overlapRules !== 'object') return fallback;
+        if (!overlapRules[from] || typeof overlapRules[from] !== 'object') return fallback;
+        if (!Object.prototype.hasOwnProperty.call(overlapRules[from], to)) return fallback;
+        return overlapRules[from][to] !== false;
+    };
+
+    const blockWithVacation = rule(newCategory, 'vacation');
+    const blockWithPermission = rule(newCategory, 'permission');
+    const blockWithAbsence = rule(newCategory, 'absence');
+
+    // Construir consulta para Vacation según los tipos a bloquear.
+    const typeOr = [];
+    if (blockWithVacation) {
+        typeOr.push({ type: 'vacation' }, { type: { $exists: false } }, { type: null });
+    }
+    if (blockWithPermission) {
+        typeOr.push({ type: { $exists: true, $ne: 'vacation' } });
+    }
+
+    const vacationPromise = (typeOr.length === 0)
+        ? Promise.resolve(null)
+        : (async () => {
+            const vacationQuery = {
+                employee_id: employeeId,
+                status: { $in: activeStatuses },
+                start_date: { $lte: endDate },
+                end_date: { $gte: startDate },
+                $or: typeOr
+            };
+
+            if (excludeVacationId) {
+                vacationQuery._id = { $ne: excludeVacationId };
+            }
+
+            return Vacation.findOne(vacationQuery).select('_id type status start_date end_date').lean();
+        })();
+
+    const absencePromise = !blockWithAbsence
+        ? Promise.resolve(null)
+        : Absence.findOne({
+            employee_id: employeeId,
+            start_date: { $lte: endDate },
+            $or: [
+                { end_date: { $gte: startDate } },
+                { end_date: null },
+                { end_date: { $exists: false } }
+            ]
+        }).select('_id type status start_date end_date').lean();
+
+    const [vacationOverlap, absenceOverlap] = await Promise.all([vacationPromise, absencePromise]);
+
+    return { vacationOverlap, absenceOverlap, newCategory, blockWithVacation, blockWithPermission, blockWithAbsence };
+}
+
+function canTransitionStatus(fromStatus, toStatus) {
+    const from = fromStatus || 'pending';
+    const to = toStatus || 'pending';
+
+    if (from === to) return true;
+
+    const allowed = {
+        pending: new Set(['approved', 'rejected', 'cancelled']),
+        approved: new Set(['revoked']),
+        rejected: new Set([]),
+        cancelled: new Set([]),
+        revoked: new Set([])
+    };
+
+    return !!allowed[from] && allowed[from].has(to);
 }
 
 async function getEmployeeInScope(req, res, employeeId) {
@@ -57,18 +287,50 @@ async function getEmployeeInScope(req, res, employeeId) {
     return employee;
 }
 
-async function buildTimeOffBalanceForEmployee(employeeId, year) {
+async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
     const start = new Date(`${year}-01-01T00:00:00.000Z`);
     const end = new Date(`${year}-12-31T23:59:59.999Z`);
 
+    const includePreviousYearForCarryover = !!options.includePreviousYearForCarryover;
+    const prevYear = year - 1;
+    const prevStart = new Date(`${prevYear}-01-01T00:00:00.000Z`);
+    const queryStart = includePreviousYearForCarryover ? prevStart : start;
+
+    const yearSet = includePreviousYearForCarryover ? [year, prevYear] : [year];
+
     const items = await Vacation.find({
         employee_id: employeeId,
-        start_date: { $lte: end },
-        end_date: { $gte: start }
+        $or: [
+            // Preferencia: imputación por año contable (si existe)
+            { vacation_year: { $in: yearSet } },
+            // Compatibilidad: registros antiguos sin vacation_year (por solape de fechas)
+            { start_date: { $lte: end }, end_date: { $gte: queryStart } }
+        ]
     }).lean();
 
-    const vacations = items.filter(v => (v.type || 'vacation') === 'vacation');
-    const permissions = items.filter(v => (v.type || 'vacation') !== 'vacation');
+    const getYearTag = (v) => {
+        const vy = Number(v && v.vacation_year);
+        if (Number.isFinite(vy) && vy >= 1970 && vy <= 3000) return vy;
+        // Fallback para datos antiguos: imputar al año de inicio (UTC)
+        const s = v && v.start_date ? new Date(v.start_date) : null;
+        if (s && !Number.isNaN(s.getTime())) return s.getUTCFullYear();
+        return null;
+    };
+
+    const itemsCurrentYear = items.filter(v => {
+        const tag = getYearTag(v);
+        return tag === year;
+    });
+
+    const itemsPrevYear = includePreviousYearForCarryover
+        ? items.filter(v => {
+            const tag = getYearTag(v);
+            return tag === prevYear;
+        })
+        : [];
+
+    const vacations = itemsCurrentYear.filter(v => (v.type || 'vacation') === 'vacation');
+    const permissions = itemsCurrentYear.filter(v => (v.type || 'vacation') !== 'vacation');
 
     const vacationApproved = sumDaysByStatus(vacations, 'approved');
     const vacationPending = sumDaysByStatus(vacations, 'pending');
@@ -78,11 +340,19 @@ async function buildTimeOffBalanceForEmployee(employeeId, year) {
     const permPending = sumDaysByStatus(permissions, 'pending');
     const permRejected = sumDaysByStatus(permissions, 'rejected');
 
+    const prevVacations = itemsPrevYear.filter(v => (v.type || 'vacation') === 'vacation');
+    const prevVacationApproved = includePreviousYearForCarryover ? sumDaysByStatus(prevVacations, 'approved') : 0;
+    const prevVacationPending = includePreviousYearForCarryover ? sumDaysByStatus(prevVacations, 'pending') : 0;
+
     return {
         year,
         employee_id: String(employeeId),
         vacation: {
             allowance_days: null,
+            base_allowance_days: null,
+            carryover_days: 0,
+            previous_year_unused_days: 0,
+            policy: null,
             approved_days: vacationApproved,
             pending_days: vacationPending,
             rejected_days: vacationRejected,
@@ -93,7 +363,14 @@ async function buildTimeOffBalanceForEmployee(employeeId, year) {
             approved_days: permApproved,
             pending_days: permPending,
             rejected_days: permRejected
-        }
+        },
+        previous_year: includePreviousYearForCarryover ? {
+            year: prevYear,
+            vacation: {
+                approved_days: prevVacationApproved,
+                pending_days: prevVacationPending
+            }
+        } : null
     };
 }
 
@@ -119,10 +396,38 @@ router.get('/balance', async (req, res) => {
             : await getEmployeeInScope(req, res, employee_id);
         if (!employee) return;
 
-        const balance = await buildTimeOffBalanceForEmployee(employee_id, year);
+        const settings = await getSettingsForAccess();
+        const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
 
-        const allowance = Number(employee.annual_vacation_days);
-        const allowanceDays = Number.isFinite(allowance) ? allowance : 30;
+        const balance = await buildTimeOffBalanceForEmployee(employee_id, year, {
+            includePreviousYearForCarryover: policy.carryover_enabled && policy.carryover_max_days > 0
+        });
+
+        const baseAllowanceDays = computeProratedAnnualAllowanceDays(employee, year, policy);
+        let carryoverDays = 0;
+        let previousYearUnusedDays = 0;
+
+        if (policy.carryover_enabled && policy.carryover_max_days > 0) {
+            const prevAllowanceDays = computeProratedAnnualAllowanceDays(employee, year - 1, policy);
+            const prevApproved = balance.previous_year && balance.previous_year.vacation
+                ? Number(balance.previous_year.vacation.approved_days) || 0
+                : 0;
+
+            previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
+            carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
+        }
+
+        const allowanceDays = baseAllowanceDays + carryoverDays;
+        balance.vacation.policy = {
+            proration_enabled: policy.proration_enabled,
+            proration_rounding_increment: policy.proration_rounding_increment,
+            carryover_enabled: policy.carryover_enabled,
+            carryover_max_days: policy.carryover_max_days,
+            carryover_expiry_month_day: policy.carryover_expiry_month_day
+        };
+        balance.vacation.base_allowance_days = baseAllowanceDays;
+        balance.vacation.carryover_days = carryoverDays;
+        balance.vacation.previous_year_unused_days = previousYearUnusedDays;
         balance.vacation.allowance_days = allowanceDays;
         balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - balance.vacation.approved_days);
         balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - balance.vacation.approved_days - balance.vacation.pending_days);
@@ -189,16 +494,43 @@ router.get('/balances', async (req, res) => {
         }
 
         const employees = await Employee.find(employeesQuery)
-            .select('_id annual_vacation_days full_name dni position location')
+            .select('_id annual_vacation_days full_name dni position location hire_date termination_date')
             .lean();
+
+        const settings = await getSettingsForAccess();
+        const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
 
         const balances = [];
         for (const e of employees) {
             const employeeId = e._id;
-            const balance = await buildTimeOffBalanceForEmployee(employeeId, year);
 
-            const allowance = Number(e.annual_vacation_days);
-            const allowanceDays = Number.isFinite(allowance) ? allowance : 30;
+            const balance = await buildTimeOffBalanceForEmployee(employeeId, year, {
+                includePreviousYearForCarryover: policy.carryover_enabled && policy.carryover_max_days > 0
+            });
+
+            const baseAllowanceDays = computeProratedAnnualAllowanceDays(e, year, policy);
+            let carryoverDays = 0;
+            let previousYearUnusedDays = 0;
+            if (policy.carryover_enabled && policy.carryover_max_days > 0) {
+                const prevAllowanceDays = computeProratedAnnualAllowanceDays(e, year - 1, policy);
+                const prevApproved = balance.previous_year && balance.previous_year.vacation
+                    ? Number(balance.previous_year.vacation.approved_days) || 0
+                    : 0;
+                previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
+                carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
+            }
+
+            const allowanceDays = baseAllowanceDays + carryoverDays;
+            balance.vacation.policy = {
+                proration_enabled: policy.proration_enabled,
+                proration_rounding_increment: policy.proration_rounding_increment,
+                carryover_enabled: policy.carryover_enabled,
+                carryover_max_days: policy.carryover_max_days,
+                carryover_expiry_month_day: policy.carryover_expiry_month_day
+            };
+            balance.vacation.base_allowance_days = baseAllowanceDays;
+            balance.vacation.carryover_days = carryoverDays;
+            balance.vacation.previous_year_unused_days = previousYearUnusedDays;
             balance.vacation.allowance_days = allowanceDays;
             balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - balance.vacation.approved_days);
             balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - balance.vacation.approved_days - balance.vacation.pending_days);
@@ -287,6 +619,166 @@ router.get('/', async (req, res) => {
     }
 });
 
+// Vista equipo: ausencias/vacaciones/permisos por rango y (opcional) ubicación
+// GET /api/vacations/team-calendar?start=YYYY-MM-DD&end=YYYY-MM-DD&location=TIENDA
+router.get('/team-calendar', async (req, res) => {
+    try {
+        if (isEmployeeUser(req.user)) {
+            return res.status(403).json({ error: 'Acceso denegado' });
+        }
+
+        const hasVacAccess = await requireFeatureAccess(req, res, 'vacations');
+        if (!hasVacAccess) return;
+
+        const startRaw = req.query && req.query.start ? String(req.query.start) : '';
+        const endRaw = req.query && req.query.end ? String(req.query.end) : '';
+        const location = req.query && req.query.location ? String(req.query.location).trim() : '';
+
+        let startDate = parseIsoDateOrNull(startRaw);
+        let endDate = parseIsoDateOrNull(endRaw);
+
+        // Defaults: mes actual
+        if (!startDate || !endDate) {
+            const now = new Date();
+            const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+            const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+            startDate = startDate || first;
+            endDate = endDate || last;
+        }
+
+        if (endDate.getTime() < startDate.getTime()) {
+            return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
+        }
+
+        // Límite de rango para evitar respuestas enormes
+        const maxDays = 62;
+        const diffMs = endDate.getTime() - startDate.getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+        if (diffDays > maxDays) {
+            return res.status(400).json({ error: `Rango demasiado grande (máx. ${maxDays} días)` });
+        }
+
+        // Construir query de empleados (scope + ubicación)
+        const employeesQuery = { status: { $ne: 'inactive' } };
+        if (location) {
+            employeesQuery.location = location;
+        }
+
+        if (isStoreCoordinator(req.user)) {
+            const storeLocations = await getStoreLocations();
+            if (location) {
+                employeesQuery.location = { $in: storeLocations.filter(l => l === location) };
+            } else {
+                employeesQuery.location = { $in: storeLocations };
+            }
+        }
+
+        const employees = await Employee.find(employeesQuery)
+            .select('_id full_name location position')
+            .lean()
+            .maxTimeMS(15000);
+
+        const employeeIds = employees.map(e => e._id);
+        const employeeById = new Map(employees.map(e => [String(e._id), e]));
+
+        if (employeeIds.length === 0) {
+            return res.json({
+                range: { start: toDateOnlyString(startDate), end: toDateOnlyString(endDate) },
+                location: location || null,
+                events: []
+            });
+        }
+
+        const settings = await getSettingsForAccess();
+        const coordAccess = (req.user.role === 'store_coordinator' && settings && settings.store_coordinator_access)
+            ? settings.store_coordinator_access
+            : null;
+        const includePermissions = req.user.role === 'admin' ? true : !!(coordAccess && coordAccess.permissions);
+        const includeAbsences = req.user.role === 'admin' ? true : !!(coordAccess && coordAccess.absences);
+
+        const vacationQuery = {
+            employee_id: { $in: employeeIds },
+            status: { $in: ['pending', 'approved'] },
+            start_date: { $lte: endDate },
+            end_date: { $gte: startDate }
+        };
+
+        // Si no incluye permisos, limitamos a type=vacation
+        if (!includePermissions) {
+            vacationQuery.type = 'vacation';
+        }
+
+        const absenceQuery = {
+            employee_id: { $in: employeeIds },
+            start_date: { $lte: endDate },
+            $or: [
+                { end_date: { $gte: startDate } },
+                { end_date: null },
+                { end_date: { $exists: false } }
+            ]
+        };
+
+        const [vacationItems, absenceItems] = await Promise.all([
+            Vacation.find(vacationQuery).select('_id employee_id type status start_date end_date days reason').lean(),
+            includeAbsences
+                ? Absence.find(absenceQuery).select('_id employee_id type status start_date end_date reason notes').lean()
+                : Promise.resolve([])
+        ]);
+
+        const events = [];
+
+        for (const v of vacationItems) {
+            const emp = employeeById.get(String(v.employee_id));
+            const normalizedType = String(v.type || 'vacation').toLowerCase();
+            events.push({
+                id: String(v._id),
+                kind: normalizedType === 'vacation' ? 'vacation' : 'permission',
+                subtype: normalizedType,
+                status: v.status || 'pending',
+                start_date: v.start_date,
+                end_date: v.end_date,
+                days: v.days,
+                reason: v.reason,
+                employee: emp ? {
+                    id: String(emp._id),
+                    full_name: emp.full_name,
+                    location: emp.location,
+                    position: emp.position
+                } : { id: String(v.employee_id) }
+            });
+        }
+
+        for (const a of (absenceItems || [])) {
+            const emp = employeeById.get(String(a.employee_id));
+            events.push({
+                id: String(a._id),
+                kind: 'absence',
+                subtype: a.type || 'other',
+                status: a.status || 'active',
+                start_date: a.start_date,
+                end_date: a.end_date,
+                reason: a.reason,
+                notes: a.notes,
+                employee: emp ? {
+                    id: String(emp._id),
+                    full_name: emp.full_name,
+                    location: emp.location,
+                    position: emp.position
+                } : { id: String(a.employee_id) }
+            });
+        }
+
+        return res.json({
+            range: { start: toDateOnlyString(startDate), end: toDateOnlyString(endDate) },
+            location: location || null,
+            events
+        });
+    } catch (error) {
+        console.error('Error en vista equipo (calendario):', error);
+        return res.status(500).json({ error: 'Error al obtener vista equipo' });
+    }
+});
+
 const { calculateVacationDays } = require('../utils/dateUtils');
 
 // Crear solicitud de vacaciones
@@ -301,10 +793,19 @@ router.post('/', async (req, res) => {
         const bodyEmployeeId = req.body?.employee_id;
         if (isEmployeeUser(req.user) && !ensureEmployeeLinked(req, res)) return;
         const employee_id = isEmployeeUser(req.user) ? req.user.employee_id : bodyEmployeeId;
-        const { start_date, end_date, type, reason } = req.body;
+        const { start_date, end_date, type, reason, vacation_year } = req.body;
 
         if (!employee_id || !start_date || !end_date) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
+        }
+
+        const startDate = parseIsoDateOrNull(start_date);
+        const endDate = parseIsoDateOrNull(end_date);
+        if (!startDate || !endDate) {
+            return res.status(400).json({ error: 'Fechas inválidas' });
+        }
+        if (endDate.getTime() < startDate.getTime()) {
+            return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
         }
 
         const employee = await Employee.findById(employee_id);
@@ -317,14 +818,49 @@ router.post('/', async (req, res) => {
             if (!ok) return;
         }
 
+        // Validación: bloquear solapes con otras solicitudes/ausencias
+        const overlaps = await findOverlapsForEmployee({ employeeId: employee_id, employeeLocation: employee.location, startDate, endDate, requestType: type });
+        if (overlaps.vacationOverlap) {
+            return res.status(409).json({ error: 'El rango se solapa con otra solicitud existente (pendiente o aprobada)' });
+        }
+        if (overlaps.absenceOverlap) {
+            return res.status(409).json({ error: 'El rango se solapa con una baja/ausencia existente' });
+        }
+
         // Cálculo automático de días reales (naturales menos festivos/findes según convenio)
-        const days = await calculateVacationDays(new Date(start_date), new Date(end_date), employee.location);
+        const days = await calculateVacationDays(startDate, endDate, employee.location);
+
+        const computedVacationYear = deriveVacationYear({
+            explicitYear: vacation_year,
+            startDate,
+            reason
+        });
 
         const vacation = new Vacation({
-            employee_id, start_date, end_date, days, type, reason, status: 'pending'
+            employee_id,
+            vacation_year: computedVacationYear,
+            start_date: startDate,
+            end_date: endDate,
+            days,
+            type,
+            reason,
+            status: 'pending'
         });
 
         await vacation.save();
+
+        await logAudit({
+            req,
+            action: 'timeoff.create',
+            entityType: 'Vacation',
+            entityId: String(vacation._id),
+            employeeId: String(employee_id),
+            employeeLocation: String(employee.location || ''),
+            before: null,
+            after: pick(vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason']),
+            meta: { source: isEmployeeUser(req.user) ? 'employee' : 'admin' }
+        });
+
         res.status(201).json({ id: vacation._id, days, message: 'Solicitud creada correctamente' });
 
     } catch (error) {
@@ -336,19 +872,51 @@ router.post('/', async (req, res) => {
 // Actualizar solicitud de vacación
 router.put('/:id', async (req, res) => {
     try {
-        const { status, reason, start_date, end_date, type, days } = req.body;
+        const { status, reason, start_date, end_date, type, days, vacation_year, rejection_reason, cancellation_reason, revocation_reason } = req.body;
         const update = {};
 
         const existing = await Vacation.findById(req.params.id);
         if (!existing) return res.status(404).json({ error: 'Solicitud no encontrada' });
 
+        const employeeForAudit = await Employee.findById(existing.employee_id).select('location').lean();
+        const employeeLocationForAudit = employeeForAudit && employeeForAudit.location ? String(employeeForAudit.location) : '';
+
+        const beforeSnapshot = pick(existing.toObject(), ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
+
         if (isEmployeeUser(req.user)) {
             if (!ensureSelfEmployee(req, res, existing.employee_id)) return;
 
-            // Empleado: solo puede editar si está pendiente y NO puede cambiar el status
+            // Empleado: puede cancelar si está pendiente; si no, solo editar campos si está pendiente.
             if (status) {
-                return res.status(403).json({ error: 'No tienes permiso para cambiar el estado' });
+                if (String(status) !== 'cancelled') {
+                    return res.status(403).json({ error: 'No tienes permiso para cambiar el estado' });
+                }
+                if (existing.status !== 'pending') {
+                    return res.status(403).json({ error: 'Solo puedes cancelar solicitudes pendientes' });
+                }
+
+                update.status = 'cancelled';
+                update.cancelled_by = req.user.id;
+                update.cancelled_date = new Date();
+                if (cancellation_reason !== undefined) update.cancellation_reason = cancellation_reason;
+
+                const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
+
+                await logAudit({
+                    req,
+                    action: 'timeoff.cancel',
+                    entityType: 'Vacation',
+                    entityId: String(existing._id),
+                    employeeId: String(existing.employee_id),
+                    employeeLocation: employeeLocationForAudit,
+                    before: beforeSnapshot,
+                    after: pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'status', 'start_date', 'end_date', 'days', 'reason', 'cancellation_reason']),
+                    meta: { by_role: req.user && req.user.role ? req.user.role : 'employee' }
+                });
+
+                return res.json({ message: 'Solicitud cancelada correctamente', vacation });
             }
+
             if (existing.status !== 'pending') {
                 return res.status(403).json({ error: 'Solo puedes modificar solicitudes pendientes' });
             }
@@ -357,22 +925,74 @@ router.put('/:id', async (req, res) => {
             if (end_date) update.end_date = end_date;
             if (type) update.type = type;
             if (reason !== undefined) update.reason = reason;
+            if (vacation_year !== undefined) update.vacation_year = vacation_year;
 
             // Recalcular días si cambia rango (no confiar en el cliente)
             if (start_date || end_date) {
                 const employee = await Employee.findById(existing.employee_id).select('location').lean();
                 if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
-                const newStart = new Date(update.start_date || existing.start_date);
-                const newEnd = new Date(update.end_date || existing.end_date);
+                const newStart = parseIsoDateOrNull(update.start_date || existing.start_date);
+                const newEnd = parseIsoDateOrNull(update.end_date || existing.end_date);
+                if (!newStart || !newEnd) return res.status(400).json({ error: 'Fechas inválidas' });
+                if (newEnd.getTime() < newStart.getTime()) return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
+
+                const overlaps = await findOverlapsForEmployee({
+                    employeeId: existing.employee_id,
+                    employeeLocation: employee.location,
+                    startDate: newStart,
+                    endDate: newEnd,
+                    requestType: update.type || existing.type,
+                    excludeVacationId: existing._id
+                });
+                if (overlaps.vacationOverlap) {
+                    return res.status(409).json({ error: 'El rango se solapa con otra solicitud existente (pendiente o aprobada)' });
+                }
+                if (overlaps.absenceOverlap) {
+                    return res.status(409).json({ error: 'El rango se solapa con una baja/ausencia existente' });
+                }
+
                 update.days = await calculateVacationDays(newStart, newEnd, employee.location);
+
+                // Si no se indicó explícitamente, mantener o derivar el año contable
+                if (vacation_year === undefined) {
+                    update.vacation_year = existing.vacation_year ?? deriveVacationYear({
+                        explicitYear: null,
+                        startDate: newStart,
+                        reason: (reason !== undefined ? reason : existing.reason)
+                    });
+                }
             }
         } else {
-            // Si se envía status, es una aprobación/rechazo (normalmente admin)
+            // Si se envía status, es una decisión (aprobación/rechazo/cancelación/revocación)
             if (status) {
-                update.status = status;
-                if (status === 'approved') {
+                const newStatus = String(status);
+                if (!canTransitionStatus(existing.status, newStatus)) {
+                    return res.status(400).json({ error: `Transición de estado no permitida (${existing.status} → ${newStatus})` });
+                }
+
+                if (newStatus === 'rejected') {
+                    const rr = (rejection_reason == null ? '' : String(rejection_reason)).trim();
+                    if (!rr) {
+                        return res.status(400).json({ error: 'El motivo de rechazo es obligatorio' });
+                    }
+                    update.status = 'rejected';
+                    update.rejection_reason = rr;
+                    update.rejected_by = req.user.id;
+                    update.rejected_date = new Date();
+                } else if (newStatus === 'approved') {
+                    update.status = 'approved';
                     update.approved_by = req.user.id;
                     update.approved_date = new Date();
+                } else if (newStatus === 'cancelled') {
+                    update.status = 'cancelled';
+                    update.cancelled_by = req.user.id;
+                    update.cancelled_date = new Date();
+                    if (cancellation_reason !== undefined) update.cancellation_reason = cancellation_reason;
+                } else if (newStatus === 'revoked') {
+                    update.status = 'revoked';
+                    update.revoked_by = req.user.id;
+                    update.revoked_date = new Date();
+                    if (revocation_reason !== undefined) update.revocation_reason = revocation_reason;
                 }
             }
 
@@ -383,16 +1003,79 @@ router.put('/:id', async (req, res) => {
             const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
             if (!ok) return;
 
-            if (existing.status === 'pending' || req.user.role === 'admin' || req.user.role === 'store_coordinator') {
+            // Edición de fechas/días: solo si está pendiente (evitar cambios retroactivos en aprobadas)
+            if (existing.status === 'pending') {
                 if (start_date) update.start_date = start_date;
                 if (end_date) update.end_date = end_date;
                 if (type) update.type = type;
-                if (reason) update.reason = reason;
-                if (days) update.days = days;
+                if (reason !== undefined) update.reason = reason;
+                if (vacation_year !== undefined) update.vacation_year = vacation_year;
+
+                if (start_date || end_date) {
+                    const employee = await Employee.findById(existing.employee_id).select('location').lean();
+                    if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+                    const newStart = parseIsoDateOrNull(update.start_date || existing.start_date);
+                    const newEnd = parseIsoDateOrNull(update.end_date || existing.end_date);
+                    if (!newStart || !newEnd) return res.status(400).json({ error: 'Fechas inválidas' });
+                    if (newEnd.getTime() < newStart.getTime()) return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
+
+                    const overlaps = await findOverlapsForEmployee({
+                        employeeId: existing.employee_id,
+                        employeeLocation: employee.location,
+                        startDate: newStart,
+                        endDate: newEnd,
+                        requestType: update.type || existing.type,
+                        excludeVacationId: existing._id
+                    });
+                    if (overlaps.vacationOverlap) {
+                        return res.status(409).json({ error: 'El rango se solapa con otra solicitud existente (pendiente o aprobada)' });
+                    }
+                    if (overlaps.absenceOverlap) {
+                        return res.status(409).json({ error: 'El rango se solapa con una baja/ausencia existente' });
+                    }
+
+                    update.days = await calculateVacationDays(newStart, newEnd, employee.location);
+
+                    if (vacation_year === undefined) {
+                        update.vacation_year = existing.vacation_year ?? deriveVacationYear({
+                            explicitYear: null,
+                            startDate: newStart,
+                            reason: (reason !== undefined ? reason : existing.reason)
+                        });
+                    }
+                } else if (days) {
+                    // Permitir override explícito si no cambia fechas (mantener comportamiento existente)
+                    update.days = days;
+                }
             }
         }
 
         const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
+
+        const afterSnapshot = pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
+        const changed = shallowDiff(beforeSnapshot, afterSnapshot);
+
+        let auditAction = 'timeoff.update';
+        if (beforeSnapshot.status !== afterSnapshot.status) {
+            if (afterSnapshot.status === 'approved') auditAction = 'timeoff.approve';
+            else if (afterSnapshot.status === 'rejected') auditAction = 'timeoff.reject';
+            else if (afterSnapshot.status === 'cancelled') auditAction = 'timeoff.cancel';
+            else if (afterSnapshot.status === 'revoked') auditAction = 'timeoff.revoke';
+            else auditAction = 'timeoff.status_change';
+        }
+
+        await logAudit({
+            req,
+            action: auditAction,
+            entityType: 'Vacation',
+            entityId: String(existing._id),
+            employeeId: String(existing.employee_id),
+            employeeLocation: employeeLocationForAudit,
+            before: beforeSnapshot,
+            after: afterSnapshot,
+            meta: { changed }
+        });
+
         res.json({ message: 'Solicitud actualizada correctamente', vacation });
 
     } catch (error) {

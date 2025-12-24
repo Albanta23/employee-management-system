@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reportes - Gestión RH</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo"><span>👥</span><span>Gestión RH</span></div>
+        </div>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link active"><span>📈</span> Reportes</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a></li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a></li>
+            <li class="menu-item"><a href="locations.html" class="menu-link"><span>📍</span> Ubicaciones</a></li>
+            <li class="menu-item"><a href="settings.html" class="menu-link"><span>⚙️</span> Configuración</a></li>
+        </ul>
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="card fade-in" style="margin-bottom: var(--spacing-xl);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);">
+                <div>
+                    <h1 style="margin: 0;">Reportes</h1>
+                    <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Informes de gestión con filtros y exportación</p>
+                </div>
+                <div class="actions-grid" style="padding-top: 0;">
+                    <button onclick="exportPDF()" class="btn btn-secondary"><span>📄</span> PDF</button>
+                    <button onclick="exportCSV()" class="btn btn-secondary"><span>📤</span> CSV</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div class="card" style="margin-bottom: var(--spacing-lg);">
+            <div class="grid grid-cols-4">
+                <div class="form-group">
+                    <label class="form-label">Tipo de reporte</label>
+                    <select id="reportType" class="form-select" onchange="onReportTypeChange()">
+                        <option value="vacation">Consumo de vacaciones (por empleado)</option>
+                        <option value="absences">Absentismo por causa</option>
+                        <option value="monthly">Resumen mensual por tienda</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Ubicación</label>
+                    <select id="locationFilter" class="form-select">
+                        <option value="">Todas</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="dateStartGroup">
+                    <label class="form-label">Fecha inicio</label>
+                    <input type="date" id="startDate" class="form-control">
+                </div>
+
+                <div class="form-group" id="dateEndGroup">
+                    <label class="form-label">Fecha fin</label>
+                    <input type="date" id="endDate" class="form-control">
+                </div>
+
+                <div class="form-group" id="monthGroup" style="display:none;">
+                    <label class="form-label">Mes</label>
+                    <input type="month" id="month" class="form-control">
+                </div>
+
+                <div class="form-group" style="display: flex; align-items: flex-end;">
+                    <button onclick="loadReport()" class="btn btn-primary" style="width: 100%;">🔍 Generar</button>
+                </div>
+            </div>
+
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0.75rem 0 0 0;">
+                Nota: los totales se calculan sobre el rango seleccionado.
+            </p>
+        </div>
+
+        <div class="card">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr id="reportHeadRow">
+                            <th>—</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportBody">
+                        <tr>
+                            <td style="text-align: center; padding: 2rem; color: var(--text-muted);">Usa los filtros y pulsa Generar</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="js/reports.js"></script>
+
+    <script>
+        if (!isAuthenticated()) window.location.href = 'index.html';
+
+        const currentUser = getUser();
+        if (currentUser && currentUser.role === 'employee') {
+            window.location.href = 'employee-dashboard.html';
+        }
+
+        let currentExport = { title: '', columns: [], rows: [], fileName: 'Reporte' };
+
+        function toISODate(d) {
+            const dt = new Date(d);
+            if (Number.isNaN(dt.getTime())) return '';
+            return dt.toISOString().split('T')[0];
+        }
+
+        async function initLocationFilter() {
+            const data = await employeesAPI.getAll({ status: 'active', limit: 2000 });
+            const list = data && data.employees ? data.employees : [];
+            const locations = Array.from(new Set(list.map(e => (e.location || '').trim()).filter(Boolean))).sort();
+
+            const sel = document.getElementById('locationFilter');
+            const current = sel.value;
+            sel.innerHTML = `<option value="">Todas</option>` + locations.map(l => `<option value="${l.replace(/"/g, '&quot;')}">${l}</option>`).join('');
+            sel.value = locations.includes(current) ? current : '';
+        }
+
+        function onReportTypeChange() {
+            const type = document.getElementById('reportType').value;
+            const monthGroup = document.getElementById('monthGroup');
+            const startGroup = document.getElementById('dateStartGroup');
+            const endGroup = document.getElementById('dateEndGroup');
+
+            if (type === 'monthly') {
+                monthGroup.style.display = '';
+                startGroup.style.display = 'none';
+                endGroup.style.display = 'none';
+            } else {
+                monthGroup.style.display = 'none';
+                startGroup.style.display = '';
+                endGroup.style.display = '';
+            }
+        }
+
+        function setTable(columns, rows) {
+            const head = document.getElementById('reportHeadRow');
+            const body = document.getElementById('reportBody');
+
+            head.innerHTML = columns.map(c => `<th>${c}</th>`).join('');
+
+            if (!rows || rows.length === 0) {
+                body.innerHTML = `<tr><td colspan="${columns.length}" style="text-align:center; padding: 2rem; color: var(--text-muted);">Sin resultados</td></tr>`;
+                return;
+            }
+
+            body.innerHTML = rows.map(r => `<tr>${r.map(v => `<td>${v}</td>`).join('')}</tr>`).join('');
+        }
+
+        async function loadReport() {
+            const type = document.getElementById('reportType').value;
+            const location = document.getElementById('locationFilter').value;
+
+            const body = document.getElementById('reportBody');
+            body.innerHTML = `<tr><td style="text-align:center; padding: 2rem;">Cargando...</td></tr>`;
+
+            if (type === 'vacation') {
+                const start_date = document.getElementById('startDate').value;
+                const end_date = document.getElementById('endDate').value;
+
+                const data = await reportsAPI.getVacationConsumption({ start_date, end_date, ...(location ? { location } : {}), type: 'vacation' });
+                if (!data) {
+                    setTable(['—'], [[ 'No se pudo generar el reporte' ]]);
+                    return;
+                }
+
+                const columns = ['Empleado', 'DNI', 'Ubicación', 'Aprobadas', 'Pendientes', 'Total'];
+                const rows = (data.rows || []).map(x => [
+                    x.full_name || '-',
+                    x.dni || '-',
+                    x.location || '-',
+                    (x.approved_days ?? 0),
+                    (x.pending_days ?? 0),
+                    (x.total_requested_days ?? 0)
+                ]);
+
+                const title = `Consumo de vacaciones (${toISODate(data.range.start)} a ${toISODate(data.range.end)})`;
+                const fileName = `Consumo_Vacaciones_${toISODate(data.range.start)}_${toISODate(data.range.end)}`;
+
+                currentExport = { title, columns, rows, fileName };
+                setTable(columns, rows);
+                return;
+            }
+
+            if (type === 'absences') {
+                const start_date = document.getElementById('startDate').value;
+                const end_date = document.getElementById('endDate').value;
+
+                const data = await reportsAPI.getAbsencesByType({ start_date, end_date, ...(location ? { location } : {}) });
+                if (!data) {
+                    setTable(['—'], [[ 'No se pudo generar el reporte' ]]);
+                    return;
+                }
+
+                const columns = ['Causa', 'Casos', 'Casos activos', 'Días (rango)'];
+                const rows = (data.rows || []).map(x => [
+                    x.type || 'other',
+                    (x.count ?? 0),
+                    (x.active_count ?? 0),
+                    (x.total_days ?? 0)
+                ]);
+
+                const title = `Absentismo por causa (${toISODate(data.range.start)} a ${toISODate(data.range.end)})`;
+                const fileName = `Absentismo_${toISODate(data.range.start)}_${toISODate(data.range.end)}`;
+
+                currentExport = { title, columns, rows, fileName };
+                setTable(columns, rows);
+                return;
+            }
+
+            if (type === 'monthly') {
+                const month = document.getElementById('month').value;
+                const data = await reportsAPI.getMonthlyLocationSummary({ month, ...(location ? { location } : {}) });
+                if (!data) {
+                    setTable(['—'], [[ 'No se pudo generar el reporte' ]]);
+                    return;
+                }
+
+                const columns = ['Ubicación', 'Empleados activos', 'Vacas aprobadas (días)', 'Vacas pendientes (días)', 'Bajas (días)', 'Bajas activas'];
+                const rows = (data.rows || []).map(x => [
+                    x.location || '-',
+                    (x.active_employees ?? 0),
+                    (x.vacation_approved_days ?? 0),
+                    (x.vacation_pending_days ?? 0),
+                    (x.absences_days ?? 0),
+                    (x.absences_active_count ?? 0)
+                ]);
+
+                const title = `Resumen mensual por tienda (${data.month || month || ''})`;
+                const fileName = `Resumen_Mensual_${data.month || month || ''}`;
+
+                currentExport = { title, columns, rows, fileName };
+                setTable(columns, rows);
+                return;
+            }
+        }
+
+        async function exportPDF() {
+            if (!currentExport || !currentExport.columns || currentExport.columns.length === 0) {
+                showAlert('Genera un reporte primero', 'warning');
+                return;
+            }
+            if (!currentExport.rows || currentExport.rows.length === 0) {
+                showAlert('No hay datos para exportar', 'warning');
+                return;
+            }
+
+            const reportType = document.getElementById('reportType').value;
+            const location = document.getElementById('location').value;
+            const start = document.getElementById('startDate').value;
+            const end = document.getElementById('endDate').value;
+            const month = document.getElementById('month').value;
+
+            const metaLines = [`Registros: ${currentExport.rows.length}`];
+            if (location) metaLines.push(`Ubicación: ${location}`);
+            if (reportType === 'vacation' || reportType === 'absences') metaLines.push(`Rango: ${start} a ${end}`);
+            if (reportType === 'monthly') metaLines.push(`Mes: ${month}`);
+
+            await reportsUtil.exportTable(
+                currentExport.title,
+                currentExport.columns,
+                currentExport.rows,
+                currentExport.fileName,
+                { orientation: 'l', metaLines }
+            );
+        }
+
+        function exportCSV() {
+            if (!currentExport || !currentExport.columns || currentExport.columns.length === 0) {
+                showAlert('Genera un reporte primero', 'warning');
+                return;
+            }
+            if (!currentExport.rows || currentExport.rows.length === 0) {
+                showAlert('No hay datos para exportar', 'warning');
+                return;
+            }
+
+            const escape = (v) => {
+                const s = (v == null ? '' : String(v));
+                if (/[\n\r",;]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+                return s;
+            };
+
+            const csv = [
+                currentExport.columns.map(escape).join(','),
+                ...currentExport.rows.map(r => r.map(escape).join(','))
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${(currentExport.fileName || 'Reporte').replace(/[^\w\-.]+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => {
+                try { URL.revokeObjectURL(url); } catch (_) { }
+            }, 60 * 1000);
+        }
+
+        (function initDefaults() {
+            const now = new Date();
+            const yearStart = new Date(now.getFullYear(), 0, 1);
+            const yearEnd = new Date(now.getFullYear(), 11, 31);
+            document.getElementById('startDate').value = toISODate(yearStart);
+            document.getElementById('endDate').value = toISODate(yearEnd);
+            document.getElementById('month').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            onReportTypeChange();
+        })();
+
+        initLocationFilter().catch(() => { /* no-op */ });
+    </script>
+</body>
+
+</html>

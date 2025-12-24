@@ -99,6 +99,20 @@
 
             container.innerHTML = data.map(v => {
                 const isPending = v.status === 'pending';
+                const status = v.status || 'pending';
+                const statusLabelMap = {
+                    pending: 'Pendiente',
+                    approved: 'Aprobada',
+                    rejected: 'Rechazada',
+                    cancelled: 'Cancelada',
+                    revoked: 'Revocada'
+                };
+                const badgeVariant = (s) => {
+                    if (s === 'approved') return 'success';
+                    if (s === 'pending') return 'warning';
+                    if (s === 'rejected') return 'error';
+                    return 'info';
+                };
                 return `
                 <div class="card" style="margin-bottom: 1rem; padding: 1.25rem;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
@@ -106,8 +120,8 @@
                             <h4 style="margin: 0;">${v.type === 'vacation' ? 'Vacaciones' : 'Permiso'}</h4>
                             <p style="color: var(--text-muted); font-size: 0.8125rem; margin: 0.25rem 0 0 0;">Solicitado el ${formatDate(v.created_at)}</p>
                         </div>
-                        <span class="badge badge-${v.status === 'approved' ? 'success' : v.status === 'pending' ? 'warning' : 'danger'}">
-                            ${v.status.toUpperCase()}
+                        <span class="badge badge-${badgeVariant(status)}">
+                            ${(statusLabelMap[status] || status).toUpperCase()}
                         </span>
                     </div>
                     <div style="display: flex; gap: 2rem; background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: var(--radius-md);">
@@ -128,7 +142,7 @@
                     
                     ${isPending ? `
                         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; gap: 0.5rem; justify-content: flex-end;">
-                            <button onclick="deleteVacation('${v._id}')" class="btn btn-sm btn-danger" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;">🗑️ Eliminar</button>
+                            <button onclick="cancelVacation('${v._id}')" class="btn btn-sm btn-danger" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;">✋ Cancelar</button>
                             <a href="employee-requests.html?type=${v.type}&edit=${v._id}" class="btn btn-sm btn-secondary" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.3); color: #a5b4fc; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px;">✏️ Modificar</a>
                         </div>
                     ` : ''}
@@ -136,13 +150,13 @@
             `}).join('');
         }
 
-        async function deleteVacation(id) {
-            if (confirm('¿Estás seguro de que deseas eliminar esta solicitud?')) {
-                const res = await vacationsAPI.delete(id);
-                if (res) {
-                    showAlert('Solicitud eliminada correctamente', 'success');
-                    loadVacations();
-                }
+        async function cancelVacation(id) {
+            if (!confirm('¿Quieres cancelar esta solicitud?')) return;
+            const res = await vacationsAPI.update(id, { status: 'cancelled' });
+            if (res) {
+                showAlert('Solicitud cancelada correctamente', 'success');
+                loadVacations();
+                loadBalance();
             }
         }
 

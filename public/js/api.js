@@ -153,6 +153,10 @@ const vacationsAPI = {
         const query = new URLSearchParams(params).toString();
         return callAPI(`${API_URL}/vacations/calendar?${query}`);
     },
+    getTeamCalendar: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/vacations/team-calendar${query ? '?' + query : ''}`);
+    },
     getById: (id) => callAPI(`${API_URL}/vacations/${id}`),
     create: (data) => callAPI(`${API_URL}/vacations`, {
         method: 'POST',
@@ -163,6 +167,30 @@ const vacationsAPI = {
         body: JSON.stringify(data)
     }),
     delete: (id) => callAPI(`${API_URL}/vacations/${id}`, { method: 'DELETE' })
+};
+
+// API - Auditoría
+const auditAPI = {
+    getLogs: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/audit${query ? '?' + query : ''}`);
+    }
+};
+
+// API - Reportes (gestión)
+const reportsAPI = {
+    getVacationConsumption: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/reports/vacation-consumption${query ? '?' + query : ''}`);
+    },
+    getAbsencesByType: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/reports/absences-by-type${query ? '?' + query : ''}`);
+    },
+    getMonthlyLocationSummary: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/reports/monthly-location-summary${query ? '?' + query : ''}`);
+    }
 };
 
 // API - Bajas
@@ -220,11 +248,25 @@ const settingsAPI = {
     get: () => callAPI(`${API_URL}/settings`),
     getAdmin: () => callAPI(`${API_URL}/settings/admin`),
     getAccess: () => callAPI(`${API_URL}/settings/access`),
+    getOverlapRules: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/settings/overlap-rules${query ? '?' + query : ''}`);
+    },
+    getOverlapRuleTargets: () => callAPI(`${API_URL}/settings/overlap-rules/targets`),
+    getVacationPolicy: () => callAPI(`${API_URL}/settings/vacation-policy`),
     update: (data) => callAPI(`${API_URL}/settings`, {
         method: 'PUT',
         body: JSON.stringify(data)
     }),
     updateStoreCoordinator: (data) => callAPI(`${API_URL}/settings/store-coordinator`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    updateOverlapRules: (data) => callAPI(`${API_URL}/settings/overlap-rules`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    updateVacationPolicy: (data) => callAPI(`${API_URL}/settings/vacation-policy`, {
         method: 'PUT',
         body: JSON.stringify(data)
     }),
@@ -240,13 +282,6 @@ const settingsAPI = {
         const user = getUser();
         if (!user || user.role !== 'store_coordinator') return;
 
-        // Ocultar siempre Configuración
-        const settingsLink = document.querySelector('.sidebar a[href="settings.html"]');
-        if (settingsLink) {
-            const li = settingsLink.closest('li');
-            if (li) li.style.display = 'none';
-        }
-
         const accessData = await settingsAPI.getAccess();
         if (!accessData || accessData.role !== 'store_coordinator') return;
 
@@ -256,8 +291,16 @@ const settingsAPI = {
 
         const access = accessData.access || {};
 
+        // Ocultar Configuración solo si no tiene permiso
+        const settingsLink = document.querySelector('.sidebar a[href="settings.html"]');
+        if (settingsLink) {
+            const li = settingsLink.closest('li');
+            if (li) li.style.display = access.settings ? '' : 'none';
+        }
+
         const featureToHref = {
             dashboard: 'dashboard.html',
+            reports: 'reports.html',
             employees: 'employees.html',
             attendance: 'attendance-admin.html',
             vacations: 'vacations.html',
@@ -279,6 +322,7 @@ const settingsAPI = {
         const currentPage = (window.location.pathname.split('/').pop() || '').toLowerCase();
         const pageToFeature = {
             'dashboard.html': 'dashboard',
+            'reports.html': 'reports',
             'employees.html': 'employees',
             'employee-form.html': 'employees',
             'employee-profile.html': 'employees',

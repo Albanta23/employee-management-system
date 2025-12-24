@@ -18,6 +18,7 @@
         </div>
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
             <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
             </li>
@@ -176,10 +177,22 @@
                 formatDate(p.end_date),
                 p.days || 0,
                 p.location || '-',
-                (p.status || 'pendiente').toUpperCase()
+                getStatusLabel(p.status || 'pending')
             ]);
 
-            reportsUtil.exportTable('LISTADO DE AUSENCIAS Y PERMISOS', columns, rows, 'Listado_Permisos');
+            const totalDays = currentPermissions.reduce((sum, p) => sum + (Number(p.days) || 0), 0);
+            reportsUtil.exportTable(
+                'LISTADO DE AUSENCIAS Y PERMISOS',
+                columns,
+                rows,
+                'Listado_Permisos',
+                {
+                    metaLines: [
+                        `Registros: ${currentPermissions.length}`,
+                        `Total días: ${totalDays}`
+                    ]
+                }
+            );
         }
 
         async function printJustification(id) {
@@ -205,7 +218,7 @@
                     <td><span class="badge badge-info">${getTypeLabel(p.type)}</span></td>
                     <td>${formatDate(p.start_date)} - ${formatDate(p.end_date)}</td>
                     <td>${p.days || 0} día(s)</td>
-                    <td><span class="badge badge-${status === 'approved' ? 'success' : status === 'rejected' ? 'error' : 'warning'}">${getStatusLabel(status)}</span></td>
+                    <td><span class="badge badge-${getStatusBadgeVariant(status)}">${getStatusLabel(status)}</span></td>
                     <td class="action-buttons">
                         ${status === 'pending' ? `
                             <button onclick="updatePermStatus('${id}', 'approved')" class="btn btn-sm btn-success" title="Aprobar">✓</button>
@@ -232,9 +245,18 @@
             const labels = {
                 'pending': 'Pendiente',
                 'approved': 'Aprobado',
-                'rejected': 'Rechazado'
+                'rejected': 'Rechazado',
+                'cancelled': 'Cancelado',
+                'revoked': 'Revocado'
             };
             return labels[status] || status;
+        }
+
+        function getStatusBadgeVariant(status) {
+            if (status === 'approved') return 'success';
+            if (status === 'pending') return 'warning';
+            if (status === 'rejected') return 'error';
+            return 'info';
         }
 
         function updateStats(perms) {
@@ -246,7 +268,19 @@
         }
 
         async function updatePermStatus(id, status) {
-            const result = await vacationsAPI.update(id, { status });
+            let payload = { status };
+            if (status === 'rejected') {
+                const motivo = prompt('Indica el motivo del rechazo (obligatorio):');
+                if (motivo === null) return;
+                const trimmed = String(motivo || '').trim();
+                if (!trimmed) {
+                    showAlert('El motivo de rechazo es obligatorio', 'warning');
+                    return;
+                }
+                payload.rejection_reason = trimmed;
+            }
+
+            const result = await vacationsAPI.update(id, payload);
             if (result) {
                 showAlert(`Permiso ${status === 'approved' ? 'aprobado' : 'rechazado'}`, status === 'approved' ? 'success' : 'error');
                 loadPermissions();

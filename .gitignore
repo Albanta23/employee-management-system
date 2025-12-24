@@ -48,3 +48,6 @@ temp/
 
 # Deployment guides with secrets
 DEPLOY_GUIDE_COOLIFY.md
+
+# Android (local machine paths)
+android/local.properties

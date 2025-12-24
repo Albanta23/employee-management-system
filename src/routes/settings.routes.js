@@ -2,9 +2,114 @@ const express = require('express');
 const router = express.Router();
 const Settings = require('../models/Settings');
 const User = require('../models/User');
-const { getSettingsForAccess } = require('../utils/accessScope');
+const { getSettingsForAccess, requireFeatureAccess } = require('../utils/accessScope');
+const Employee = require('../models/Employee');
 const bcrypt = require('bcrypt');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { logAudit, pick, shallowDiff } = require('../utils/audit');
+
+function buildDefaultOverlapRules() {
+    return {
+        vacation: { vacation: true, permission: true, absence: true },
+        permission: { vacation: true, permission: true, absence: true },
+        absence: { vacation: true, permission: true, absence: true }
+    };
+}
+
+function buildDefaultVacationPolicy() {
+    return {
+        proration_enabled: false,
+        proration_rounding_increment: 0.5,
+        carryover_enabled: false,
+        carryover_max_days: 0,
+        carryover_expiry_month_day: '03-31'
+    };
+}
+
+function normalizeVacationPolicy(input) {
+    const out = buildDefaultVacationPolicy();
+    if (!input || typeof input !== 'object') return out;
+
+    if (Object.prototype.hasOwnProperty.call(input, 'proration_enabled')) {
+        out.proration_enabled = !!input.proration_enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'proration_rounding_increment')) {
+        const inc = Number(input.proration_rounding_increment);
+        out.proration_rounding_increment = (Number.isFinite(inc) && inc > 0) ? inc : out.proration_rounding_increment;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_enabled')) {
+        out.carryover_enabled = !!input.carryover_enabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_max_days')) {
+        const max = Number(input.carryover_max_days);
+        out.carryover_max_days = (Number.isFinite(max) && max >= 0) ? max : out.carryover_max_days;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'carryover_expiry_month_day')) {
+        const md = String(input.carryover_expiry_month_day || '').trim();
+        if (/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(md)) {
+            out.carryover_expiry_month_day = md;
+        }
+    }
+
+    return out;
+}
+
+function normalizeOverlapRules(input) {
+    const defaults = buildDefaultOverlapRules();
+    if (!input || typeof input !== 'object') return defaults;
+
+    const out = buildDefaultOverlapRules();
+    for (const fromKey of ['vacation', 'permission', 'absence']) {
+        const row = input[fromKey];
+        if (!row || typeof row !== 'object') continue;
+        for (const toKey of ['vacation', 'permission', 'absence']) {
+            if (Object.prototype.hasOwnProperty.call(row, toKey)) {
+                out[fromKey][toKey] = !!row[toKey];
+            }
+        }
+    }
+    return out;
+}
+
+function getLocationOverride(settings, locationKey) {
+    if (!settings || !locationKey) return null;
+    const key = String(locationKey || '').trim();
+    if (!key) return null;
+
+    const raw = settings.overlap_rules_by_location;
+    if (!raw) return null;
+
+    // Con lean() puede venir como objeto plano; con documento puede ser Map.
+    if (raw instanceof Map) {
+        return raw.get(key) || null;
+    }
+
+    if (typeof raw === 'object') {
+        return raw[key] || null;
+    }
+
+    return null;
+}
+
+function setLocationOverride(settings, locationKey, rules) {
+    const key = String(locationKey || '').trim();
+    if (!key) return false;
+
+    if (!settings.overlap_rules_by_location) {
+        settings.overlap_rules_by_location = new Map();
+    }
+
+    // Documento: Map
+    if (settings.overlap_rules_by_location instanceof Map) {
+        settings.overlap_rules_by_location.set(key, rules);
+        return true;
+    }
+
+    // Por si Mongoose lo materializa como objeto
+    settings.overlap_rules_by_location[key] = rules;
+    return true;
+}
 
 function withTimeout(promise, ms, label) {
     let timer;
@@ -130,7 +235,7 @@ router.get('/access', authenticateToken, async (req, res) => {
                 enabled: !!settings.store_coordinator_enabled,
                 access: {
                     ...(settings.store_coordinator_access || {}),
-                    settings: false
+                    settings: !!(settings.store_coordinator_access && settings.store_coordinator_access.settings)
                 }
             });
         }
@@ -142,6 +247,242 @@ router.get('/access', authenticateToken, async (req, res) => {
             return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
         }
         res.status(500).json({ error: 'Error al obtener configuración de accesos' });
+    }
+});
+
+// Get/Update Overlap Rules (ADMIN or store_coordinator with settings access)
+router.get('/overlap-rules/targets', authenticateToken, async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'settings');
+        if (!hasAccess) return;
+
+        if (req.user.role === 'store_coordinator') {
+            const settings = await getSettingsForAccess();
+            if (!settings.store_coordinator_enabled) {
+                return res.status(403).json({ error: 'Perfil de Coordinador desactivado' });
+            }
+
+            // Scope del coordinador: lista de tiendas/ubicaciones permitidas (Employee.location)
+            const storeLocations = Array.isArray(settings.store_locations) ? settings.store_locations : [];
+            // Si no hay lista configurada, el accessScope deriva tiendas a partir de empleados; aquí
+            // evitamos duplicar lógica: devolvemos el array configurado y, si está vacío, devolvemos el distinct.
+            const cleaned = storeLocations.map(s => String(s || '').trim()).filter(Boolean);
+            if (cleaned.length > 0) {
+                return res.json({ targets: Array.from(new Set(cleaned)).sort() });
+            }
+
+            const distinct = await Employee.distinct('location', {
+                location: { $exists: true, $ne: null, $ne: '' }
+            }).maxTimeMS(15000);
+
+            // Si el admin no configuró tiendas, el coordinador “tienda vs fábrica” se decide en accessScope.
+            // Para no inventar aquí, devolvemos el distinct; el coordinador solo podrá GUARDAR para ubicaciones
+            // que el backend valide como permitidas (en PUT).
+            return res.json({ targets: (distinct || []).map(s => String(s).trim()).filter(Boolean).sort() });
+        }
+
+        // Admin: todas las ubicaciones existentes en empleados
+        const distinct = await Employee.distinct('location', {
+            location: { $exists: true, $ne: null, $ne: '' }
+        }).maxTimeMS(15000);
+
+        return res.json({ targets: (distinct || []).map(s => String(s).trim()).filter(Boolean).sort() });
+    } catch (error) {
+        console.error('Error al obtener targets de reglas de solapamiento:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        return res.status(500).json({ error: 'Error al obtener ubicaciones disponibles' });
+    }
+});
+
+router.get('/overlap-rules', authenticateToken, async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'settings');
+        if (!hasAccess) return;
+
+        const location = req.query && req.query.location ? String(req.query.location).trim() : '';
+
+        let settings = await withTimeout(
+            Settings.findOne().maxTimeMS(15000),
+            16000,
+            'Settings.findOne (overlap-rules get)'
+        );
+        if (!settings) settings = new Settings();
+
+        const globalRules = normalizeOverlapRules(settings.overlap_rules);
+        const locationRulesRaw = location ? getLocationOverride(settings, location) : null;
+        const locationRules = location ? normalizeOverlapRules(locationRulesRaw) : null;
+
+        return res.json({
+            location: location || null,
+            is_override: !!(location && locationRulesRaw),
+            overlap_rules: location ? (locationRules || globalRules) : globalRules,
+            updated_at: settings.updated_at
+        });
+    } catch (error) {
+        console.error('Error al obtener reglas de solapamiento:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        return res.status(500).json({ error: 'Error al obtener reglas de solapamiento' });
+    }
+});
+
+router.put('/overlap-rules', authenticateToken, async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'settings');
+        if (!hasAccess) return;
+
+        const location = req.body && typeof req.body === 'object' && req.body.location != null
+            ? String(req.body.location).trim()
+            : '';
+
+        const incoming = req.body && typeof req.body === 'object' ? req.body.overlap_rules : null;
+        const normalized = normalizeOverlapRules(incoming);
+
+        // Coordinador: solo puede definir reglas para ubicaciones de su scope
+        if (req.user.role === 'store_coordinator' && location) {
+            const settingsAccess = await getSettingsForAccess();
+            if (!settingsAccess.store_coordinator_enabled) {
+                return res.status(403).json({ error: 'Perfil de Coordinador desactivado' });
+            }
+
+            const configured = Array.isArray(settingsAccess.store_locations) ? settingsAccess.store_locations : [];
+            const allowed = new Set(configured.map(s => String(s || '').trim()).filter(Boolean));
+
+            // Si no hay lista configurada, seguimos permitiendo guardar, pero solo si existe una ubicación real en empleados.
+            if (allowed.size > 0) {
+                if (!allowed.has(location)) {
+                    return res.status(403).json({ error: 'No tienes permiso para configurar esta ubicación' });
+                }
+            } else {
+                const exists = await Employee.exists({ location }).maxTimeMS(15000);
+                if (!exists) {
+                    return res.status(400).json({ error: 'Ubicación no válida' });
+                }
+            }
+        }
+
+        let settings = await withTimeout(
+            Settings.findOne().maxTimeMS(15000),
+            16000,
+            'Settings.findOne (overlap-rules put)'
+        );
+        if (!settings) settings = new Settings();
+
+        const before = {
+            location: location || null,
+            overlap_rules: location ? getLocationOverride(settings, location) : settings.overlap_rules
+        };
+
+        if (location) {
+            setLocationOverride(settings, location, normalized);
+        } else {
+            settings.overlap_rules = normalized;
+        }
+        settings.updated_at = Date.now();
+
+        await withTimeout(settings.save(), 20000, 'Settings.save (overlap-rules put)');
+
+        const after = {
+            location: location || null,
+            overlap_rules: normalized
+        };
+
+        await logAudit({
+            req,
+            action: 'settings.overlap_rules.update',
+            entityType: 'Settings',
+            entityId: settings && settings._id ? String(settings._id) : 'singleton',
+            employeeId: '',
+            employeeLocation: '',
+            before,
+            after,
+            meta: { changed: shallowDiff(before, after) }
+        });
+
+        return res.json({
+            location: location || null,
+            overlap_rules: normalized,
+            updated_at: settings.updated_at
+        });
+    } catch (error) {
+        console.error('Error al guardar reglas de solapamiento:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        return res.status(500).json({ error: 'Error al actualizar reglas de solapamiento' });
+    }
+});
+
+// Get/Update Vacation Policy (ADMIN or store_coordinator with settings access)
+router.get('/vacation-policy', authenticateToken, async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'settings');
+        if (!hasAccess) return;
+
+        const settings = await getSettingsForAccess();
+        const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
+
+        return res.json({ vacation_policy: policy, updated_at: settings && settings.updated_at ? settings.updated_at : null });
+    } catch (error) {
+        console.error('Error al obtener política de vacaciones:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        return res.status(500).json({ error: 'Error al obtener política de vacaciones' });
+    }
+});
+
+router.put('/vacation-policy', authenticateToken, async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'settings');
+        if (!hasAccess) return;
+
+        if (req.user.role === 'store_coordinator') {
+            const settingsAccess = await getSettingsForAccess();
+            if (!settingsAccess.store_coordinator_enabled) {
+                return res.status(403).json({ error: 'Perfil de Coordinador desactivado' });
+            }
+        }
+
+        const normalized = normalizeVacationPolicy(req.body && req.body.vacation_policy ? req.body.vacation_policy : req.body);
+
+        let settings = await withTimeout(
+            Settings.findOne().maxTimeMS(15000),
+            16000,
+            'Settings.findOne (vacation-policy put)'
+        );
+        if (!settings) settings = new Settings();
+
+        const before = pick(settings.toObject ? settings.toObject() : settings, ['vacation_policy']);
+
+        settings.vacation_policy = normalized;
+        settings.updated_at = Date.now();
+
+        await withTimeout(settings.save(), 20000, 'Settings.save (vacation-policy put)');
+
+        const after = { vacation_policy: normalized };
+        await logAudit({
+            req,
+            action: 'settings.vacation_policy.update',
+            entityType: 'Settings',
+            entityId: settings && settings._id ? String(settings._id) : 'singleton',
+            employeeId: '',
+            employeeLocation: '',
+            before,
+            after,
+            meta: { changed: shallowDiff(before, after) }
+        });
+
+        return res.json({ vacation_policy: normalized, updated_at: settings.updated_at });
+    } catch (error) {
+        console.error('Error al guardar política de vacaciones:', error);
+        if (error && error.code === 'ETIMEDOUT') {
+            return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
+        }
+        return res.status(500).json({ error: 'Error al actualizar política de vacaciones' });
     }
 });
 
@@ -168,6 +509,8 @@ router.put('/', authenticateToken, isAdmin, async (req, res) => {
             settings = new Settings();
         }
 
+        const before = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64']);
+
         settings.company_name = company_name;
         settings.company_address = company_address;
         settings.company_cif = company_cif;
@@ -175,6 +518,20 @@ router.put('/', authenticateToken, isAdmin, async (req, res) => {
         settings.updated_at = Date.now();
 
         await withTimeout(settings.save(), 20000, 'Settings.save (update branding)');
+
+        const after = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64']);
+        await logAudit({
+            req,
+            action: 'settings.branding.update',
+            entityType: 'Settings',
+            entityId: settings && settings._id ? String(settings._id) : 'singleton',
+            employeeId: '',
+            employeeLocation: '',
+            before,
+            after,
+            meta: { changed: shallowDiff(before, after), logo_changed: before.logo_base64 !== after.logo_base64 }
+        });
+
         res.json(settings);
     } catch (error) {
         console.error('Error saving settings:', error);
@@ -203,6 +560,8 @@ router.put('/store-coordinator', authenticateToken, isAdmin, async (req, res) =>
         );
         if (!settings) settings = new Settings();
 
+        const before = pick(settings.toObject ? settings.toObject() : settings, ['store_locations', 'store_coordinator_enabled', 'store_coordinator_user_id', 'store_coordinator_access']);
+
         // Asegurar estructura en documentos antiguos (sin defaults)
         if (!settings.store_coordinator_access || typeof settings.store_coordinator_access !== 'object') {
             settings.store_coordinator_access = {
@@ -212,7 +571,9 @@ router.put('/store-coordinator', authenticateToken, isAdmin, async (req, res) =>
                 vacations: true,
                 absences: true,
                 permissions: true,
-                reports: true
+                reports: true,
+                locations: true,
+                settings: false
             };
         }
         if (!Array.isArray(settings.store_locations)) {
@@ -226,7 +587,7 @@ router.put('/store-coordinator', authenticateToken, isAdmin, async (req, res) =>
 
         // Persist access map (only known keys)
         if (access && typeof access === 'object') {
-            const allowedKeys = ['dashboard', 'employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports', 'locations'];
+            const allowedKeys = ['dashboard', 'employees', 'attendance', 'vacations', 'absences', 'permissions', 'reports', 'locations', 'settings'];
             for (const key of allowedKeys) {
                 if (Object.prototype.hasOwnProperty.call(access, key)) {
                     settings.store_coordinator_access[key] = !!access[key];
@@ -284,6 +645,23 @@ router.put('/store-coordinator', authenticateToken, isAdmin, async (req, res) =>
         settings.updated_at = Date.now();
         await withTimeout(settings.save(), 20000, 'Settings.save (store-coordinator)');
 
+        const after = pick(settings.toObject ? settings.toObject() : settings, ['store_locations', 'store_coordinator_enabled', 'store_coordinator_user_id', 'store_coordinator_access']);
+        await logAudit({
+            req,
+            action: 'settings.store_coordinator.update',
+            entityType: 'Settings',
+            entityId: settings && settings._id ? String(settings._id) : 'singleton',
+            employeeId: '',
+            employeeLocation: '',
+            before,
+            after,
+            meta: {
+                changed: shallowDiff(before, after),
+                username_changed: !!username,
+                password_changed: !!password
+            }
+        });
+
         res.json({
             message: 'Configuración del Coordinador de Tiendas actualizada correctamente',
             settings: {
@@ -324,6 +702,8 @@ router.put('/admin-credentials', authenticateToken, isAdmin, async (req, res) =>
            However, simplifying as per user request to just "substitute".
         */
 
+        const before = { username: adminUser.username };
+
         if (new_username) adminUser.username = new_username;
         if (new_password) {
             const salt = await bcrypt.genSalt(10);
@@ -331,6 +711,19 @@ router.put('/admin-credentials', authenticateToken, isAdmin, async (req, res) =>
         }
 
         await adminUser.save();
+
+        const after = { username: adminUser.username };
+        await logAudit({
+            req,
+            action: 'settings.admin_credentials.update',
+            entityType: 'User',
+            entityId: String(adminUser._id),
+            employeeId: '',
+            employeeLocation: '',
+            before,
+            after,
+            meta: { username_changed: !!new_username, password_changed: !!new_password }
+        });
         res.json({ message: 'Credenciales de administrador actualizadas correctamente' });
 
     } catch (error) {

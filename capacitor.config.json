@@ -3,7 +3,7 @@
   "appName": "Employee Management",
   "webDir": "public",
   "server": {
-    "url": "https://pedidosweb-cestaproduccion.vercel.app/",
+    "url": "https://employee-management-system-xi-swart.vercel.app/",
     "cleartext": false
   }
 }

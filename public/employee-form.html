@@ -18,6 +18,7 @@
         </div>
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link active"><span>👤</span> Trabajadores</a>
             </li>
             <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
@@ -130,6 +131,36 @@
                     </p>
                 </div>
 
+                <div id="auditHistoryCard" class="card" style="display:none; margin-top: var(--spacing-lg); padding: 1.25rem;">
+                    <div style="display:flex; justify-content: space-between; align-items:center; gap: 1rem; flex-wrap: wrap;">
+                        <div>
+                            <h3 style="margin: 0;">📜 Historial</h3>
+                            <p style="color: var(--text-muted); margin: 0.35rem 0 0 0; font-size: 0.85rem;">Últimos cambios registrados para este trabajador.</p>
+                        </div>
+                        <div style="display:flex; gap: 0.5rem; align-items:center;">
+                            <button type="button" class="btn btn-secondary" onclick="loadAuditHistory(true)">🔄 Actualizar</button>
+                        </div>
+                    </div>
+
+                    <div class="table-container" style="margin-top: var(--spacing-md);">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Actor</th>
+                                    <th>Acción</th>
+                                    <th>Detalle</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditHistoryTable">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">Cargando...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div class="card"
                     style="background: rgba(99, 102, 241, 0.05); border: 1px dashed var(--primary); margin-top: var(--spacing-lg);">
                     <h3 style="margin-bottom: var(--spacing-md);">🔐 Acceso para Empleado (App Móvil/Tablet)</h3>
@@ -169,6 +200,12 @@
     <script src="js/branding.js"></script>
     <script>
         if (!isAuthenticated()) window.location.href = 'index.html';
+
+        const currentUser = getUser();
+        if (currentUser && currentUser.role === 'employee') {
+            // Esta pantalla es de administración (RRHH). El empleado usa su portal.
+            window.location.href = 'employee-dashboard.html';
+        }
 
         const urlParams = new URLSearchParams(window.location.search);
         let employeeId = urlParams.get('id');
@@ -232,6 +269,9 @@
                         // Sin acceso o error: simplemente no mostramos el resumen
                         console.warn('No se pudo cargar el resumen de vacaciones:', e);
                     }
+
+                    // Historial (auditoría) - opcional, no debe bloquear
+                    loadAuditHistory().catch(() => { /* no-op */ });
                 } else {
                     showAlert('No se pudo encontrar el trabajador', 'error');
                 }
@@ -239,6 +279,120 @@
                 console.error('Error al cargar empleado:', error);
                 showAlert('Error al conectar con el servidor', 'error');
             }
+        }
+
+        async function callAPISilent(url, options = {}) {
+            const defaultOptions = { headers: getAuthHeaders() };
+
+            let response;
+            try {
+                response = await fetch(url, { ...defaultOptions, ...options });
+            } catch (_) {
+                return null;
+            }
+
+            if (handleAuthError(response)) return null;
+            if (!response.ok) return null;
+
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) return null;
+            try {
+                return await response.json();
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function formatDateTime(dateString) {
+            if (!dateString) return '-';
+            const d = new Date(dateString);
+            if (Number.isNaN(d.getTime())) return '-';
+            return d.toLocaleString('es-ES', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function safeShort(value) {
+            if (value == null) return '-';
+            const s = typeof value === 'string' ? value : JSON.stringify(value);
+            if (!s) return '-';
+            return s.length > 70 ? s.slice(0, 67) + '…' : s;
+        }
+
+        function renderAuditDetail(log) {
+            const meta = log && log.meta ? log.meta : null;
+            const changed = meta && meta.changed ? meta.changed : null;
+            if (!changed || typeof changed !== 'object') return '';
+
+            const keys = Object.keys(changed);
+            if (keys.length === 0) return '';
+
+            return keys.slice(0, 3).map(k => {
+                const item = changed[k] || {};
+                return `${k}: ${safeShort(item.before)} → ${safeShort(item.after)}`;
+            }).join(' | ');
+        }
+
+        function renderAuditRows(logs) {
+            const tbody = document.getElementById('auditHistoryTable');
+            if (!tbody) return;
+
+            if (!Array.isArray(logs) || logs.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">Sin registros</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = logs.map(log => {
+                const when = formatDateTime(log.created_at);
+                const actor = (log.actor && (log.actor.username || log.actor.role))
+                    ? `${log.actor.username || ''}${log.actor.role ? ` (${log.actor.role})` : ''}`.trim()
+                    : '-';
+                const action = log.action || '-';
+                const detail = renderAuditDetail(log);
+
+                return `
+                    <tr>
+                        <td>${when}</td>
+                        <td>${actor}</td>
+                        <td>${action}</td>
+                        <td style="font-size: 0.9em; color: var(--text-muted);">${detail}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function loadAuditHistory(force = false) {
+            if (!isEdit) return;
+
+            const card = document.getElementById('auditHistoryCard');
+            const tbody = document.getElementById('auditHistoryTable');
+            if (!card || !tbody) return;
+
+            if (force) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">Cargando...</td>
+                    </tr>
+                `;
+            }
+
+            const data = await callAPISilent(`${API_URL}/audit?employee_id=${encodeURIComponent(employeeId)}&limit=50`);
+            if (!data) {
+                // Sin acceso (403) o error: no mostramos el bloque
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+            renderAuditRows(data.logs);
         }
 
         function toggleAccessFields() {

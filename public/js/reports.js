@@ -29,23 +29,77 @@ const reportsUtil = {
             return;
         }
 
-        // En WebView intentamos abrir el PDF (más compatible que descargar).
+        // 1) En Capacitor: guardamos a fichero y abrimos el diálogo de compartir.
+        // Esto es mucho más fiable que blob URLs en WebView.
+        if (isCapacitor) {
+            try {
+                const Plugins = (window.Capacitor && window.Capacitor.Plugins) ? window.Capacitor.Plugins : {};
+                const Filesystem = Plugins.Filesystem;
+                const Share = Plugins.Share;
+
+                if (Filesystem && Share) {
+                    const blob = doc.output('blob');
+                    const base64Data = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onerror = () => reject(reader.error || new Error('No se pudo leer el PDF'));
+                        reader.onload = () => {
+                            const result = String(reader.result || '');
+                            const commaIdx = result.indexOf(',');
+                            resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+                        };
+                        reader.readAsDataURL(blob);
+                    });
+
+                    const uniqueName = safeFileName.replace(/\.pdf$/i, '') + '_' + Date.now() + '.pdf';
+                    const directory = (Filesystem.Directory && Filesystem.Directory.Cache) ? Filesystem.Directory.Cache : 'CACHE';
+
+                    await Filesystem.writeFile({
+                        path: uniqueName,
+                        data: base64Data,
+                        directory
+                    });
+
+                    const uriRes = await Filesystem.getUri({ path: uniqueName, directory });
+                    const fileUri = uriRes && uriRes.uri ? uriRes.uri : '';
+                    if (!fileUri) throw new Error('No se pudo obtener la URI del archivo');
+
+                    await Share.share({
+                        title: safeFileName,
+                        url: fileUri
+                    });
+                    return;
+                }
+            } catch (e) {
+                console.warn('Fallo guardando/compartiendo PDF en Capacitor, usando fallback WebView', e);
+                // seguimos al fallback de WebView
+            }
+        }
+
+        // 2) WebView (no-Capacitor): intentamos descarga con <a download> (evita popups).
         try {
             const blob = doc.output('blob');
             const blobUrl = URL.createObjectURL(blob);
 
-            // Algunos WebViews bloquean popups: probamos primero nueva pestaña, si falla, misma vista.
-            const opened = window.open(blobUrl, '_blank');
-            if (!opened) {
-                window.location.assign(blobUrl);
+            try {
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = safeFileName;
+                a.target = '_self';
+                a.rel = 'noopener';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } catch (_) {
+                // si falla el click programático, intentamos abrirlo
+                const opened = window.open(blobUrl, '_blank');
+                if (!opened) window.location.assign(blobUrl);
             }
 
-            // Revocar cuando ya no sea necesario (best-effort)
             setTimeout(() => {
                 try { URL.revokeObjectURL(blobUrl); } catch (_) { }
             }, 60 * 1000);
         } catch (e) {
-            console.warn('Fallo al abrir PDF en WebView, usando doc.save como fallback', e);
+            console.warn('Fallo al abrir/descargar PDF en WebView, usando doc.save como fallback', e);
             try {
                 doc.save(safeFileName);
             } catch (e2) {
@@ -198,10 +252,22 @@ const reportsUtil = {
     /**
      * Exporta una lista (tabla) a PDF
      */
-    exportTable: async (title, columns, rows, fileName, orientation = 'p') => {
+    exportTable: async (title, columns, rows, fileName, orientationOrOptions = 'p') => {
         if (!window.jspdf) return alert('Error: La librería PDF no está cargada.');
 
         await reportsUtil.loadConfig();
+
+        let orientation = 'p';
+        let metaLines = [];
+        let footerRows = [];
+
+        if (typeof orientationOrOptions === 'string') {
+            orientation = orientationOrOptions;
+        } else if (orientationOrOptions && typeof orientationOrOptions === 'object') {
+            orientation = orientationOrOptions.orientation || 'p';
+            metaLines = Array.isArray(orientationOrOptions.metaLines) ? orientationOrOptions.metaLines : [];
+            footerRows = Array.isArray(orientationOrOptions.footerRows) ? orientationOrOptions.footerRows : [];
+        }
 
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF({ orientation: orientation });
@@ -229,10 +295,30 @@ const reportsUtil = {
             doc.text(`CIF: ${config.companyCif}`, titleX, 32);
         }
 
+        let startY = 40;
+        if (metaLines.length > 0) {
+            doc.setFontSize(9);
+            doc.setTextColor(80);
+            let y = config.companyCif ? 36 : 34;
+            metaLines
+                .filter(l => l !== null && l !== undefined && String(l).trim() !== '')
+                .slice(0, 6)
+                .forEach(line => {
+                    doc.text(String(line), titleX, y);
+                    y += 5;
+                });
+            startY = Math.max(startY, y + 3);
+        }
+
+        const finalRows = Array.isArray(rows) ? rows.slice() : [];
+        if (Array.isArray(footerRows) && footerRows.length > 0) {
+            finalRows.push(...footerRows);
+        }
+
         doc.autoTable({
-            startY: 40,
+            startY,
             head: [columns],
-            body: rows,
+            body: finalRows,
             headStyles: { fillColor: config.primaryColor },
             alternateRowStyles: { fillColor: [245, 247, 250] },
             margin: { top: 40 },

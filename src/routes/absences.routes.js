@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const Absence = require('../models/Absence');
+const Vacation = require('../models/Vacation');
 const Employee = require('../models/Employee');
 const { authenticateToken } = require('../middleware/auth');
-const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds } = require('../utils/accessScope');
+const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds, getSettingsForAccess } = require('../utils/accessScope');
 
 router.use(authenticateToken);
 
@@ -27,6 +28,84 @@ function calendarDaysInclusive(startDate, endDate) {
     if (endUtc < startUtc) return 0;
     const diffDays = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24));
     return diffDays + 1;
+}
+
+function parseIsoDateOrNull(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+}
+
+async function hasOverlapForAbsence({ employeeId, employeeLocation, startDate, endDate, excludeAbsenceId = null }) {
+    const effectiveEnd = endDate || new Date('9999-12-31T00:00:00.000Z');
+
+    const settings = await getSettingsForAccess();
+    const locationKey = String(employeeLocation || '').trim();
+    const locationOverride = (settings && settings.overlap_rules_by_location && locationKey)
+        ? (settings.overlap_rules_by_location instanceof Map
+            ? settings.overlap_rules_by_location.get(locationKey)
+            : settings.overlap_rules_by_location[locationKey])
+        : null;
+
+    const overlapRules = locationOverride || (settings && settings.overlap_rules ? settings.overlap_rules : null);
+    const rule = (from, to) => {
+        const fallback = true;
+        if (!overlapRules || typeof overlapRules !== 'object') return fallback;
+        if (!overlapRules[from] || typeof overlapRules[from] !== 'object') return fallback;
+        if (!Object.prototype.hasOwnProperty.call(overlapRules[from], to)) return fallback;
+        return overlapRules[from][to] !== false;
+    };
+
+    const blockAbsenceWithAbsence = rule('absence', 'absence');
+    const blockAbsenceWithVacation = rule('absence', 'vacation');
+    const blockAbsenceWithPermission = rule('absence', 'permission');
+
+    const absenceQuery = {
+        employee_id: employeeId,
+        start_date: { $lte: effectiveEnd },
+        $or: [
+            { end_date: { $gte: startDate } },
+            { end_date: null },
+            { end_date: { $exists: false } }
+        ]
+    };
+
+    if (excludeAbsenceId) {
+        absenceQuery._id = { $ne: excludeAbsenceId };
+    }
+
+    // Vacaciones/permisos activos pueden bloquear una baja según reglas
+    const vacationTypeOr = [];
+    if (blockAbsenceWithVacation) {
+        vacationTypeOr.push({ type: 'vacation' }, { type: { $exists: false } }, { type: null });
+    }
+    if (blockAbsenceWithPermission) {
+        vacationTypeOr.push({ type: { $exists: true, $ne: 'vacation' } });
+    }
+
+    const vacationQuery = {
+        employee_id: employeeId,
+        status: { $in: ['pending', 'approved'] },
+        start_date: { $lte: effectiveEnd },
+        end_date: { $gte: startDate }
+    };
+
+    if (vacationTypeOr.length > 0) {
+        vacationQuery.$or = vacationTypeOr;
+    }
+
+    const absencePromise = !blockAbsenceWithAbsence
+        ? Promise.resolve(null)
+        : Absence.findOne(absenceQuery).select('_id type status start_date end_date').lean();
+
+    const vacationPromise = (vacationTypeOr.length === 0)
+        ? Promise.resolve(null)
+        : Vacation.findOne(vacationQuery).select('_id type status start_date end_date').lean();
+
+    const [absenceOverlap, vacationOverlap] = await Promise.all([absencePromise, vacationPromise]);
+
+    return { absenceOverlap, vacationOverlap };
 }
 
 // Resumen de ausencias (por año). Útil para control de días de bajas/ausencias.
@@ -158,8 +237,37 @@ router.post('/', async (req, res) => {
         const ok = await ensureEmployeeInScope(req, res, employee_id);
         if (!ok) return;
 
+        const employee = await Employee.findById(employee_id).select('location').lean();
+        if (!employee) {
+            return res.status(404).json({ error: 'Empleado no encontrado' });
+        }
+
+        const startDate = parseIsoDateOrNull(start_date);
+        const endDate = end_date ? parseIsoDateOrNull(end_date) : null;
+        if (!startDate || (end_date && !endDate)) {
+            return res.status(400).json({ error: 'Fechas inválidas' });
+        }
+        if (endDate && endDate.getTime() < startDate.getTime()) {
+            return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
+        }
+
+        const overlaps = await hasOverlapForAbsence({ employeeId: employee_id, employeeLocation: employee.location, startDate, endDate });
+        if (overlaps.absenceOverlap) {
+            return res.status(409).json({ error: 'El rango se solapa con otra baja/ausencia existente' });
+        }
+        if (overlaps.vacationOverlap) {
+            return res.status(409).json({ error: 'El rango se solapa con una solicitud pendiente o aprobada (vacaciones/permisos)' });
+        }
+
         const absence = new Absence({
-            employee_id, start_date, end_date, type, reason, medical_certificate, notes, status: 'active'
+            employee_id,
+            start_date: startDate,
+            end_date: endDate,
+            type,
+            reason,
+            medical_certificate,
+            notes,
+            status: 'active'
         });
 
         await absence.save();

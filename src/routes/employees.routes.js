@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { authenticateToken } = require('../middleware/auth');
 const bcrypt = require('bcrypt');
 const { requireFeatureAccess, getStoreLocations, getStoreEmployeeIds, ensureEmployeeInScope, isStoreCoordinator } = require('../utils/accessScope');
+const { logAudit, pick, shallowDiff } = require('../utils/audit');
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
@@ -442,8 +443,25 @@ router.put('/:id', async (req, res) => {
                 }
             }
             
-            const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true });
+            const beforeDoc = await Employee.findById(req.params.id).lean();
+            const before = pick(beforeDoc || {}, ['_id', 'email', 'phone', 'work_schedule']);
+
+            const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
             if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
+
+            const after = pick(employee || {}, ['_id', 'email', 'phone', 'work_schedule']);
+            const changed = shallowDiff(before, after);
+            await logAudit({
+                req,
+                action: 'employee.self_update',
+                entityType: 'Employee',
+                entityId: String(req.params.id),
+                employeeId: String(req.params.id),
+                employeeLocation: String((employee && employee.location) || ''),
+                before,
+                after,
+                meta: { changed }
+            });
             
             return res.json({ message: 'Perfil actualizado correctamente' });
         }
@@ -470,12 +488,29 @@ router.put('/:id', async (req, res) => {
             }
         }
 
+        const beforeDoc = await Employee.findById(req.params.id).lean();
+        const before = pick(beforeDoc || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days']);
+
         const update = { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date };
         if (parsedAnnualVacationDays !== undefined) update.annual_vacation_days = parsedAnnualVacationDays;
 
-        const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true });
+        const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
 
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
+
+        const after = pick(employee || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days']);
+        const changed = shallowDiff(before, after);
+        await logAudit({
+            req,
+            action: 'employee.update',
+            entityType: 'Employee',
+            entityId: String(req.params.id),
+            employeeId: String(req.params.id),
+            employeeLocation: String((employee && employee.location) || ''),
+            before,
+            after,
+            meta: { changed }
+        });
 
         if (enableAccess && username) {
             const userUpdate = { username, name: full_name, email };
@@ -505,12 +540,30 @@ router.delete('/:id', async (req, res) => {
         const inScope = await ensureEmployeeInScope(req, res, req.params.id);
         if (!inScope) return;
 
+        const beforeDoc = await Employee.findById(req.params.id).lean();
+        const before = pick(beforeDoc || {}, ['_id', 'status', 'termination_date']);
+
         const employee = await Employee.findByIdAndUpdate(req.params.id, {
             status: 'inactive',
             termination_date: new Date()
-        });
+        }, { new: true }).lean();
 
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
+
+        const after = pick(employee || {}, ['_id', 'status', 'termination_date']);
+        const changed = shallowDiff(before, after);
+        await logAudit({
+            req,
+            action: 'employee.deactivate',
+            entityType: 'Employee',
+            entityId: String(req.params.id),
+            employeeId: String(req.params.id),
+            employeeLocation: String((employee && employee.location) || ''),
+            before,
+            after,
+            meta: { changed }
+        });
+
         res.json({ message: 'Trabajador dado de baja correctamente' });
     } catch (error) {
         res.status(500).json({ error: 'Error al eliminar trabajador' });

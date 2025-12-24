@@ -18,6 +18,7 @@
         </div>
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
             <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a>
             </li>
@@ -66,6 +67,50 @@
             <div class="stat-card">
                 <div class="stat-value" id="rejectedCount">0</div>
                 <div class="stat-label">Rechazadas</div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: var(--spacing-xl);">
+            <div class="card-header" style="display:flex; justify-content: space-between; align-items: center; gap: var(--spacing-md); flex-wrap: wrap;">
+                <div>
+                    <h2 class="card-title" style="margin: 0;">Vista equipo (por día)</h2>
+                    <p style="color: var(--text-muted); margin: 0.35rem 0 0 0;">Vacaciones, permisos y bajas (según permisos del rol)</p>
+                </div>
+                <button class="btn btn-secondary" onclick="loadTeamCalendar()">🔄 Cargar</button>
+            </div>
+
+            <div class="grid grid-cols-3" style="margin-bottom: var(--spacing-lg);">
+                <div class="form-group">
+                    <label class="form-label">Ubicación</label>
+                    <select id="teamLocation" class="form-select">
+                        <option value="">Todas</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Desde</label>
+                    <input type="date" id="teamStart" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Hasta</label>
+                    <input type="date" id="teamEnd" class="form-control">
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Fuera</th>
+                            <th>Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody id="teamCalendarTable">
+                        <tr>
+                            <td colspan="3" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">Configura un rango y pulsa Cargar</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -145,6 +190,129 @@
         let currentVacations = [];
         let currentBalanceEmployeeId = null;
 
+        function toISODate(d) {
+            const date = new Date(d);
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+        }
+
+        function eachDayInclusive(startStr, endStr) {
+            const out = [];
+            const start = new Date(`${startStr}T00:00:00`);
+            const end = new Date(`${endStr}T00:00:00`);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return out;
+
+            const cursor = new Date(start);
+            while (cursor <= end) {
+                out.push(toISODate(cursor));
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            return out;
+        }
+
+        function getEventLabel(ev) {
+            if (ev.kind === 'vacation') return 'Vacaciones';
+            if (ev.kind === 'permission') return 'Permiso';
+            if (ev.kind === 'absence') return 'Baja';
+            return ev.kind || 'Evento';
+        }
+
+        function getStatusShort(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'approved') return 'aprob.';
+            if (s === 'pending') return 'pend.';
+            if (s === 'rejected') return 'rech.';
+            if (s === 'active') return 'activa';
+            if (s === 'closed') return 'cerr.';
+            if (s === 'cancelled') return 'canc.';
+            if (s === 'revoked') return 'rev.';
+            return s || '-';
+        }
+
+        async function initTeamCalendarFilters() {
+            // Default: mes actual
+            const now = new Date();
+            const first = new Date(now.getFullYear(), now.getMonth(), 1);
+            const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            document.getElementById('teamStart').value = toISODate(first);
+            document.getElementById('teamEnd').value = toISODate(last);
+
+            // Cargar ubicaciones a partir de empleados en scope
+            const employees = await employeesAPI.getAll({ status: 'active', limit: 1000 });
+            const list = employees && employees.employees ? employees.employees : [];
+            const locations = Array.from(new Set(list.map(e => (e.location || '').trim()).filter(Boolean))).sort();
+            const sel = document.getElementById('teamLocation');
+            const current = sel.value;
+            sel.innerHTML = `<option value="">Todas</option>` + locations.map(l => `<option value="${l.replace(/"/g, '&quot;')}">${l}</option>`).join('');
+            sel.value = locations.includes(current) ? current : '';
+        }
+
+        async function loadTeamCalendar() {
+            const start = document.getElementById('teamStart').value;
+            const end = document.getElementById('teamEnd').value;
+            const location = document.getElementById('teamLocation').value;
+            if (!start || !end) {
+                showAlert('Indica un rango (desde/hasta)', 'warning');
+                return;
+            }
+
+            const tbody = document.getElementById('teamCalendarTable');
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 1.5rem;">Cargando...</td></tr>';
+
+            const data = await vacationsAPI.getTeamCalendar({ start, end, ...(location ? { location } : {}) });
+            if (!data) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 1.5rem;">No se pudo cargar la vista equipo</td></tr>';
+                return;
+            }
+
+            const days = eachDayInclusive(data.range?.start || start, data.range?.end || end);
+            const events = Array.isArray(data.events) ? data.events : [];
+
+            const byDay = new Map();
+            for (const d of days) byDay.set(d, []);
+
+            for (const ev of events) {
+                const s = (ev.start_date || '').split('T')[0];
+                const rawEnd = ev.end_date ? String(ev.end_date).split('T')[0] : null;
+                const e = rawEnd || (data.range?.end || end);
+                const overlapDays = eachDayInclusive(
+                    s < (data.range?.start || start) ? (data.range?.start || start) : s,
+                    e > (data.range?.end || end) ? (data.range?.end || end) : e
+                );
+                for (const day of overlapDays) {
+                    if (!byDay.has(day)) continue;
+                    byDay.get(day).push(ev);
+                }
+            }
+
+            if (days.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 1.5rem;">Rango inválido</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = days.map(d => {
+                const items = byDay.get(d) || [];
+                if (items.length === 0) {
+                    return `<tr><td>${d}</td><td>0</td><td style="color: var(--text-muted);">—</td></tr>`;
+                }
+
+                const detail = items
+                    .slice()
+                    .sort((a, b) => String(a.employee?.full_name || '').localeCompare(String(b.employee?.full_name || '')))
+                    .map(ev => {
+                        const name = ev.employee?.full_name || 'N/A';
+                        const label = getEventLabel(ev);
+                        const st = getStatusShort(ev.status);
+                        return `<div><strong>${name}</strong> <span style="color: var(--text-muted);">(${label}, ${st})</span></div>`;
+                    })
+                    .join('');
+
+                return `<tr><td>${d}</td><td><strong>${items.length}</strong></td><td>${detail}</td></tr>`;
+            }).join('');
+        }
+
         async function loadVacations() {
             const vacations = await vacationsAPI.getAll({ type: 'vacation' });
             if (vacations) {
@@ -159,17 +327,37 @@
                 return showAlert('No hay datos para exportar', 'warning');
             }
 
-            const columns = ['Empleado', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Tienda', 'Estado'];
+            const getTypeLabel = (type) => {
+                if (type === 'vacation') return 'Vacaciones';
+                if (type === 'personal') return 'Personal';
+                if (type === 'compensatory') return 'Compensatorio';
+                return type || '-';
+            };
+
+            const columns = ['Empleado', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Tienda', 'Estado'];
             const rows = currentVacations.map(v => [
                 v.full_name || 'N/A',
+                getTypeLabel(v.type),
                 formatDate(v.start_date),
                 formatDate(v.end_date),
                 v.days || 0,
                 v.location || '-',
-                (v.status || 'pendiente').toUpperCase()
+                getStatusLabel(v.status || 'pending')
             ]);
 
-            reportsUtil.exportTable('LISTADO DE VACACIONES', columns, rows, 'Listado_Vacaciones');
+            const totalDays = currentVacations.reduce((sum, v) => sum + (Number(v.days) || 0), 0);
+            reportsUtil.exportTable(
+                'LISTADO DE VACACIONES',
+                columns,
+                rows,
+                'Listado_Vacaciones',
+                {
+                    metaLines: [
+                        `Registros: ${currentVacations.length}`,
+                        `Total días: ${totalDays}`
+                    ]
+                }
+            );
         }
 
         async function printJustification(id) {
@@ -177,6 +365,25 @@
             if (v) {
                 reportsUtil.generateJustification(v, 'Vacaciones');
             }
+        }
+
+        function getStatusLabel(status) {
+            const labels = {
+                pending: 'Pendiente',
+                approved: 'Aprobada',
+                rejected: 'Rechazada',
+                cancelled: 'Cancelada',
+                revoked: 'Revocada'
+            };
+            return labels[status] || status;
+        }
+
+        function getStatusBadgeVariant(status) {
+            if (status === 'approved') return 'success';
+            if (status === 'pending') return 'warning';
+            if (status === 'rejected') return 'error';
+            // cancelada / revocada => informativo
+            return 'info';
         }
 
         function renderVacations(vacations) {
@@ -195,7 +402,7 @@
                     <td>${formatDate(v.start_date)} - ${formatDate(v.end_date)}</td>
                     <td>${v.days || 0}</td>
                     <td><span class="badge badge-info">${v.type === 'vacation' ? 'Vacaciones' : v.type === 'personal' ? 'Personal' : 'Compensatorio'}</span></td>
-                    <td><span class="badge badge-${status === 'approved' ? 'success' : status === 'rejected' ? 'error' : 'warning'}">${status === 'approved' ? 'Aprobada' : status === 'rejected' ? 'Rechazada' : 'Pendiente'}</span></td>
+                    <td><span class="badge badge-${getStatusBadgeVariant(status)}">${getStatusLabel(status)}</span></td>
                     <td class="action-buttons">
                         ${status === 'pending' ? `
                             <button onclick="approveVacation('${id}')" class="btn btn-sm btn-success" title="Aprobar">✓</button>
@@ -225,7 +432,15 @@
         }
 
         async function rejectVacation(id) {
-            const result = await vacationsAPI.update(id, { status: 'rejected' });
+            const motivo = prompt('Indica el motivo del rechazo (obligatorio):');
+            if (motivo === null) return; // cancelado
+            const trimmed = String(motivo || '').trim();
+            if (!trimmed) {
+                showAlert('El motivo de rechazo es obligatorio', 'warning');
+                return;
+            }
+
+            const result = await vacationsAPI.update(id, { status: 'rejected', rejection_reason: trimmed });
             if (result) {
                 showAlert('Vacaciones rechazadas', 'error');
                 loadVacations();
@@ -313,6 +528,7 @@
         }
 
         loadVacations();
+        initTeamCalendarFilters();
     </script>
 </body>
 

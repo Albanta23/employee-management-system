@@ -18,6 +18,7 @@
         </div>
         <ul class="sidebar-menu">
             <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
             <li class="menu-item"><a href="employees.html" class="menu-link active"><span>👤</span> Trabajadores</a>
             </li>
             <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
@@ -235,7 +236,13 @@
                 ? 'LISTADO DE TRABAJADORES (Global)'
                 : 'LISTADO DE TRABAJADORES (Tiendas Seleccionadas)';
 
-            reportsUtil.exportTable(title, columns, rows, 'Listado_Empleados_Filtrado', 'l');
+            reportsUtil.exportTable(title, columns, rows, 'Listado_Empleados_Filtrado', {
+                orientation: 'l',
+                metaLines: [
+                    `Tiendas seleccionadas: ${selectedLocations.length}`,
+                    `Registros: ${rows.length}`
+                ]
+            });
             closeExportModal();
         }
 
