@@ -201,8 +201,22 @@
     </div>
   </div>
 
-  <!-- Capacitor runtime (solo existe dentro de la app nativa). En web puede dar 404 y es esperado. -->
-  <script src="capacitor.js"></script>
+  <!-- Capacitor runtime (solo existe dentro de la app nativa).
+       En web (https) evitamos cargarlo para no generar 404/HTML-MIME errors en consola. -->
+  <script>
+    (function loadCapacitorRuntime() {
+      try {
+        const protocol = String(window.location && window.location.protocol ? window.location.protocol : '');
+        const isNativeOrigin = protocol === 'capacitor:' || protocol === 'ionic:';
+        if (!isNativeOrigin) return;
+        const s = document.createElement('script');
+        s.src = 'capacitor.js';
+        document.head.appendChild(s);
+      } catch (_) {
+        // no-op
+      }
+    })();
+  </script>
   <script src="js/api.js"></script>
   <script src="js/branding.js"></script>
   <script src="js/biometric-loader.js"></script>

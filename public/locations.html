@@ -259,6 +259,171 @@
             border-left-color: var(--warning);
         }
 
+        .store-move-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--spacing-lg);
+        }
+
+        .store-move-panel {
+            background: rgba(30, 41, 59, 0.38);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        html.theme-light .store-move-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-color: rgba(15, 23, 42, 0.1);
+        }
+
+        .store-move-panel-title {
+            font-weight: 700;
+            margin-bottom: var(--spacing-md);
+        }
+
+        .store-move-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+        }
+
+        .store-move-store {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: 0.6rem 0.75rem;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(15, 23, 42, 0.22);
+            cursor: grab;
+            user-select: none;
+        }
+
+        html.theme-light .store-move-store {
+            background: rgba(248, 250, 252, 0.95);
+            border-color: rgba(15, 23, 42, 0.08);
+        }
+
+        .store-move-store.dragging {
+            opacity: 0.7;
+            cursor: grabbing;
+        }
+
+        .store-move-store-name {
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .store-move-targets {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+        }
+
+        .store-move-target {
+            padding: var(--spacing-md);
+            border-radius: var(--radius-md);
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            background: rgba(15, 23, 42, 0.12);
+        }
+
+        html.theme-light .store-move-target {
+            background: rgba(248, 250, 252, 0.95);
+            border-color: rgba(15, 23, 42, 0.18);
+        }
+
+        .store-move-target.drag-over {
+            border-style: solid;
+        }
+
+        .store-move-target-title {
+            font-weight: 700;
+            margin-bottom: 0.15rem;
+        }
+
+        .store-move-target-subtitle {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .employee-move-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--spacing-lg);
+        }
+
+        .employee-move-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+            max-height: 520px;
+            overflow: auto;
+        }
+
+        .employee-move-employee {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            padding: 0.6rem 0.75rem;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(15, 23, 42, 0.22);
+            cursor: grab;
+            user-select: none;
+        }
+
+        html.theme-light .employee-move-employee {
+            background: rgba(248, 250, 252, 0.95);
+            border-color: rgba(15, 23, 42, 0.08);
+        }
+
+        .employee-move-employee.dragging {
+            opacity: 0.7;
+            cursor: grabbing;
+        }
+
+        .employee-move-name {
+            font-weight: 700;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .employee-move-meta {
+            display: flex;
+            gap: var(--spacing-sm);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            overflow: hidden;
+        }
+
+        .employee-move-targets {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+            max-height: 520px;
+            overflow: auto;
+        }
+
+        .employee-move-target {
+            padding: var(--spacing-md);
+            border-radius: var(--radius-md);
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            background: rgba(15, 23, 42, 0.12);
+        }
+
+        html.theme-light .employee-move-target {
+            background: rgba(248, 250, 252, 0.95);
+            border-color: rgba(15, 23, 42, 0.18);
+        }
+
+        .employee-move-target.drag-over {
+            border-style: solid;
+        }
+
         .holiday-date {
             font-weight: bold;
             color: var(--text-primary);
@@ -370,6 +535,7 @@
             <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
             <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a></li>
             <li class="menu-item"><a href="locations.html" class="menu-link active"><span>📍</span> Ubicaciones</a></li>
+            <li class="menu-item"><a href="quadrants.html" class="menu-link"><span>🗓️</span> Cuadrantes</a></li>
             <li class="menu-item"><a href="settings.html" class="menu-link"><span>⚙️</span> Configuración</a></li>
         </ul>
 
@@ -396,6 +562,11 @@
                 <div class="card-header">
                     <h3 style="margin: 0;">📍 Ubicaciones</h3>
                     <div class="actions-grid" style="padding-top: 0;">
+                        <select id="employee-export-stores-all" class="form-select" multiple style="display:none; min-width: 260px; max-width: 420px;">
+                        </select>
+                        <button id="btn-export-employees-all" class="btn btn-secondary" style="display: none;">
+                            <span>📄</span> Exportar empleados (PDF)
+                        </button>
                         <button id="btn-add-location" class="btn btn-primary" style="display: none;">
                             <span>➕</span> Nueva Ubicación
                         </button>
@@ -415,7 +586,13 @@
                 </div>
 
                 <div class="card-header">
-                    <h3 id="stores-view-title" style="margin: 0;">Tiendas</h3>
+                    <div>
+                        <h3 id="stores-view-title" style="margin: 0;">Tiendas</h3>
+                        <div id="location-tabs-stores" style="display:none; gap: var(--spacing-sm); margin-top: var(--spacing-sm);">
+                            <button id="tab-stores-stores" class="btn btn-primary" onclick="goToStoresTab()">🏪 Tiendas</button>
+                            <button id="tab-employees-stores" class="btn btn-secondary" onclick="goToEmployeesTab()">👥 Empleados</button>
+                        </div>
+                    </div>
                     <div class="actions-grid" style="padding-top: 0;">
                         <button id="btn-add-store" class="btn btn-primary" style="display: none;">
                             <span>➕</span> Nueva Tienda
@@ -424,6 +601,37 @@
                 </div>
 
                 <div id="stores-container" class="stores-grid"></div>
+            </div>
+        </div>
+
+        <!-- Vista de Empleados (Drag & Drop) -->
+        <div id="employees-view" class="content-section" style="display: none;">
+            <div class="card">
+                <div class="breadcrumb" style="margin-bottom: var(--spacing-lg);">
+                    <span class="breadcrumb-item" onclick="showLocationsView()">📍 Ubicaciones</span>
+                    <span class="breadcrumb-separator">›</span>
+                    <span class="breadcrumb-item" id="breadcrumb-location-link-employees" onclick="goBackToStores()"></span>
+                </div>
+
+                <div class="card-header">
+                    <div>
+                        <h3 id="employees-view-title" style="margin: 0;">👥 Empleados</h3>
+                        <div id="location-tabs-employees" style="display:none; gap: var(--spacing-sm); margin-top: var(--spacing-sm);">
+                            <button id="tab-stores-employees" class="btn btn-secondary" onclick="goToStoresTab()">🏪 Tiendas</button>
+                            <button id="tab-employees-employees" class="btn btn-primary" onclick="goToEmployeesTab()">👥 Empleados</button>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap: var(--spacing-md); align-items:center;">
+                        <div style="color: var(--text-muted); font-size: 0.9rem;">Arrastra un empleado y suéltalo en la tienda/fábrica destino.</div>
+                        <select id="employee-export-stores-location" class="form-select" multiple style="display:none; min-width: 260px; max-width: 420px;">
+                        </select>
+                        <button id="btn-export-employees-location" class="btn btn-secondary" style="display:none;">
+                            <span>📄</span> Exportar PDF
+                        </button>
+                    </div>
+                </div>
+
+                <div id="employees-view-body" class="employee-move-grid"></div>
             </div>
         </div>
 
@@ -454,11 +662,6 @@
                 </div>
 
                 <div id="calendar-grid" class="calendar-grid"></div>
-
-                <div style="margin-top: var(--spacing-xl);">
-                    <h3 id="store-employees-title" style="margin: 0 0 var(--spacing-md) 0;">👥 Empleados</h3>
-                    <div id="store-employees-container" class="stores-grid"></div>
-                </div>
             </div>
         </div>
     </main>
@@ -538,8 +741,23 @@
         </div>
     </div>
 
+    <!-- Modal: Gestionar Tiendas (Drag & Drop) -->
+    <div id="store-move-modal" class="modal">
+        <div class="modal-content" style="max-width: 980px;">
+            <button class="btn-close" onclick="closeStoreMoveModal()" title="Cerrar">×</button>
+            <h2 id="store-move-modal-title" style="margin-bottom: var(--spacing-lg);">Gestionar tiendas</h2>
+            <div id="store-move-modal-body" class="store-move-grid"></div>
+            <div style="display:flex; justify-content:flex-end; margin-top: var(--spacing-lg);">
+                <button type="button" class="btn btn-secondary" onclick="closeStoreMoveModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/api.js"></script>
     <script src="js/branding.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script src="js/reports.js"></script>
     <script src="js/locations.js"></script>
 </body>
 </html>

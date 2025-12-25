@@ -23,6 +23,8 @@
     "android:open": "npx cap open android",
     "android:apk": "npx cap sync android && cd android && ./gradlew assembleDebug",
     "android:aab": "npx cap sync android && cd android && ./gradlew bundleRelease"
+    ,
+    "generate:portal-empleado-pdf": "node scripts/generate-portal-empleado-pdf.js"
   },
   "keywords": [
     "employee",
@@ -45,6 +47,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.0.2",
     "node-cron": "^3.0.3",
+    "pdfkit": "^0.17.2",
     "sqlite3": "^5.1.7",
     "xlsx": "^0.18.5"
   },

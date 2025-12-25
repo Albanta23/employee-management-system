@@ -5,12 +5,13 @@ let currentStoreId = null;
 let currentYear = new Date().getFullYear();
 let currentUser = null;
 
-let currentStoreEmployees = null; // [{...Employee}]
-let currentStoreEmployeesStoreName = null;
-
 let locations = [];
 let currentCalendar = null; // { year, locationName, storeName, holidays: [] }
 let currentLocation = null; // ubicación cargada en vista tiendas
+
+// Vista de gestión de empleados por ubicación (pestaña)
+let employeesViewLocation = null; // { _id, name, stores: [...] }
+let employeesViewEmployees = []; // [{ _id, full_name, dni, position, location }]
 
 // Meses en español
 const MONTHS = [
@@ -73,6 +74,8 @@ function setupEventListeners() {
     document.getElementById('btn-add-location')?.addEventListener('click', () => openLocationModal());
     document.getElementById('btn-add-store')?.addEventListener('click', () => openStoreModal());
     document.getElementById('btn-add-holiday')?.addEventListener('click', () => openHolidayModal());
+    document.getElementById('btn-export-employees-location')?.addEventListener('click', exportEmployeesPdfForCurrentLocation);
+    document.getElementById('btn-export-employees-all')?.addEventListener('click', exportEmployeesPdfForAllLocations);
 
     document.getElementById('location-form')?.addEventListener('submit', handleLocationSubmit);
     document.getElementById('store-form')?.addEventListener('submit', handleStoreSubmit);
@@ -120,9 +123,20 @@ async function loadLocations() {
         locations = data;
         renderLocations();
 
+        // Preparar multiselect de tiendas para exportación global
+        if (currentUser.role === 'admin') {
+            populateGlobalStoreMultiSelect();
+        }
+
         if (currentUser.role === 'admin') {
             const btn = document.getElementById('btn-add-location');
             if (btn) btn.style.display = 'block';
+
+            const btnExportAll = document.getElementById('btn-export-employees-all');
+            if (btnExportAll) btnExportAll.style.display = 'inline-flex';
+
+            const sel = document.getElementById('employee-export-stores-all');
+            if (sel) sel.style.display = 'block';
         }
 
         hideLoading();
@@ -130,6 +144,45 @@ async function loadLocations() {
         hideLoading();
         console.error('Error cargando ubicaciones:', error);
         showError('Error al cargar ubicaciones: ' + (error?.message || 'Error desconocido'));
+    }
+}
+
+function populateGlobalStoreMultiSelect() {
+    const sel = document.getElementById('employee-export-stores-all');
+    if (!sel) return;
+
+    const prevSelected = new Set(Array.from(sel.selectedOptions || []).map(o => String(o.value)));
+
+    const opts = [];
+    for (const loc of (Array.isArray(locations) ? locations : [])) {
+        if (!loc) continue;
+        const locName = String(loc.name || '');
+        for (const s of (Array.isArray(loc.stores) ? loc.stores : [])) {
+            const storeName = String(s && s.name ? s.name : '').trim();
+            if (!storeName) continue;
+            opts.push({
+                value: storeName,
+                label: `${locName} · ${storeName}`
+            });
+        }
+    }
+
+    // Deduplicar por nombre (Employee.location guarda el nombre de tienda)
+    const byValue = new Map();
+    for (const o of opts) {
+        const key = normalizeForCompare(o.value);
+        if (!byValue.has(key)) byValue.set(key, o);
+    }
+
+    const unique = Array.from(byValue.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
+
+    sel.innerHTML = '';
+    for (const o of unique) {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (prevSelected.has(o.value)) opt.selected = true;
+        sel.appendChild(opt);
     }
 }
 
@@ -176,94 +229,12 @@ async function loadCalendar() {
 
         currentCalendar = data;
         renderCalendar(data);
-        // Cargar empleados de la tienda en paralelo (no depende del año)
-        void loadStoreEmployeesForCurrentStore();
         hideLoading();
     } catch (error) {
         hideLoading();
         console.error('Error cargando calendario:', error);
         showError('Error al cargar calendario: ' + (error?.message || 'Error desconocido'));
     }
-}
-
-async function loadStoreEmployeesForCurrentStore() {
-    const storeName = currentCalendar?.storeName;
-    const locationName = currentCalendar?.locationName;
-    const titleEl = document.getElementById('store-employees-title');
-    const container = document.getElementById('store-employees-container');
-    if (!container) return;
-
-    if (titleEl) {
-        titleEl.textContent = storeName ? `👥 Empleados de ${storeName}` : '👥 Empleados';
-    }
-
-    if (!storeName) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Selecciona una tienda para ver empleados</div></div>';
-        return;
-    }
-
-    // Si ya tenemos la lista para esta tienda, re-renderizamos sin pedir al servidor.
-    if (currentStoreEmployeesStoreName === storeName && Array.isArray(currentStoreEmployees)) {
-        renderStoreEmployees(currentStoreEmployees, { storeName, locationName });
-        return;
-    }
-
-    container.innerHTML = '<div style="color: var(--text-muted); padding: 0.75rem;">Cargando empleados...</div>';
-
-    try {
-        // Importante: en el sistema, Employee.location es un string (normalmente el nombre de la tienda).
-        const res = await employeesAPI.getAll({
-            location: storeName,
-            status: 'active',
-            page: 1,
-            limit: 200
-        });
-
-        const employees = res && Array.isArray(res.employees) ? res.employees : (Array.isArray(res) ? res : []);
-        currentStoreEmployees = employees;
-        currentStoreEmployeesStoreName = storeName;
-
-        renderStoreEmployees(employees, { storeName, locationName, total: res?.pagination?.total });
-    } catch (e) {
-        console.error('Error cargando empleados por tienda:', e);
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No se pudieron cargar los empleados</div></div>';
-    }
-}
-
-function renderStoreEmployees(employees, { storeName, locationName, total } = {}) {
-    const container = document.getElementById('store-employees-container');
-    if (!container) return;
-
-    if (!Array.isArray(employees) || employees.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">👥</div>
-                <div class="empty-state-text">No hay empleados asignados a ${escapeHtml(storeName || 'esta tienda')}</div>
-                <div style="color: var(--text-muted); font-size: 0.9rem;">Revisa el campo “Ubicación” del empleado (debe coincidir con el nombre de la tienda).</div>
-            </div>
-        `;
-        return;
-    }
-
-    const note = (Number.isFinite(Number(total)) && total > employees.length)
-        ? `<div style="grid-column: 1 / -1; color: var(--text-muted); font-size: 0.85rem;">Mostrando ${employees.length} de ${total}</div>`
-        : '';
-
-    container.innerHTML = employees.map(e => {
-        const name = escapeHtml(e.full_name || e.name || 'Empleado');
-        const dni = escapeHtml(e.dni || '-');
-        const position = escapeHtml(e.position || '-');
-        const loc = escapeHtml(e.location || locationName || '-');
-
-        return `
-            <div class="store-card" style="cursor: default;">
-                <div class="store-card-title">👤 ${name}</div>
-                <div class="store-card-address">🪪 ${dni}</div>
-                <div class="store-card-address">💼 ${position}</div>
-                <div class="store-card-address">📍 ${loc}</div>
-            </div>
-        `;
-    }).join('') + note;
 }
 
 // ==================== RENDER ====================
@@ -287,11 +258,13 @@ function renderLocations() {
 
     container.innerHTML = locations.map(location => {
         const storeCount = Array.isArray(location.stores) ? location.stores.length : 0;
+        const canManageNonFactoryStores = currentUser.role === 'admin' && !isFactoryName(location?.name);
         return `
             <div class="location-card" onclick="showStoresView('${location._id}')">
                 <div class="location-card-header">
                     <h3 class="location-card-title">📍 ${escapeHtml(location.name)}</h3>
                     ${currentUser.role === 'admin' ? `
+                        ${canManageNonFactoryStores ? `<button class="btn btn-secondary btn-icon" onclick="event.stopPropagation(); openStoreMoveModal('${location._id}')" title="Gestionar tiendas (no fábrica)">↔️</button>` : ''}
                         <button class="btn btn-secondary btn-icon" onclick="event.stopPropagation(); editLocation('${location._id}')" title="Editar">✏️</button>
                         <button class="btn btn-secondary btn-icon" onclick="event.stopPropagation(); deleteLocation('${location._id}')" title="Eliminar">🗑️</button>
                     ` : ''}
@@ -507,6 +480,10 @@ function showLocationsView() {
     document.getElementById('locations-view').style.display = 'block';
     document.getElementById('stores-view').style.display = 'none';
     document.getElementById('calendar-view').style.display = 'none';
+    document.getElementById('employees-view').style.display = 'none';
+
+    employeesViewLocation = null;
+    employeesViewEmployees = [];
 
     loadLocations();
 }
@@ -519,6 +496,10 @@ function showStoresView(locationId) {
     document.getElementById('locations-view').style.display = 'none';
     document.getElementById('stores-view').style.display = 'block';
     document.getElementById('calendar-view').style.display = 'none';
+    document.getElementById('employees-view').style.display = 'none';
+
+    setLocationTabsVisibility();
+    setActiveLocationTab('stores');
 
     loadStores(locationId);
 }
@@ -528,15 +509,10 @@ function showCalendarView(locationId, storeId) {
     currentLocationId = locationId;
     currentStoreId = storeId;
 
-    // Reset cache al cambiar de tienda
-    currentStoreEmployees = null;
-    currentStoreEmployeesStoreName = null;
-    const employeesContainer = document.getElementById('store-employees-container');
-    if (employeesContainer) employeesContainer.innerHTML = '';
-
     document.getElementById('locations-view').style.display = 'none';
     document.getElementById('stores-view').style.display = 'none';
     document.getElementById('calendar-view').style.display = 'block';
+    document.getElementById('employees-view').style.display = 'none';
 
     loadCalendar();
 }
@@ -545,6 +521,480 @@ function goBackToStores() {
     if (currentLocationId) {
         showStoresView(currentLocationId);
     }
+}
+
+function goToEmployeesTab() {
+    if (currentLocationId) {
+        showEmployeesView(currentLocationId);
+    }
+}
+
+function goToStoresTab() {
+    if (currentLocationId) {
+        showStoresView(currentLocationId);
+    }
+}
+
+function setLocationTabsVisibility() {
+    const visible = !!currentUser && currentUser.role === 'admin';
+    const el1 = document.getElementById('location-tabs-stores');
+    const el2 = document.getElementById('location-tabs-employees');
+    if (el1) el1.style.display = visible ? 'flex' : 'none';
+    if (el2) el2.style.display = visible ? 'flex' : 'none';
+}
+
+function setActiveLocationTab(active) {
+    const pairs = [
+        { stores: document.getElementById('tab-stores-stores'), employees: document.getElementById('tab-employees-stores') },
+        { stores: document.getElementById('tab-stores-employees'), employees: document.getElementById('tab-employees-employees') }
+    ];
+
+    for (const p of pairs) {
+        if (!p.stores || !p.employees) continue;
+        if (active === 'employees') {
+            p.stores.className = 'btn btn-secondary';
+            p.employees.className = 'btn btn-primary';
+        } else {
+            p.stores.className = 'btn btn-primary';
+            p.employees.className = 'btn btn-secondary';
+        }
+    }
+}
+
+async function showEmployeesView(locationId) {
+    if (!currentUser || currentUser.role !== 'admin') {
+        showError('Solo administradores pueden gestionar empleados por ubicación');
+        return;
+    }
+
+    currentView = 'employees';
+    currentLocationId = locationId;
+    currentStoreId = null;
+
+    document.getElementById('locations-view').style.display = 'none';
+    document.getElementById('stores-view').style.display = 'none';
+    document.getElementById('calendar-view').style.display = 'none';
+    document.getElementById('employees-view').style.display = 'block';
+
+    setLocationTabsVisibility();
+    setActiveLocationTab('employees');
+
+    await loadEmployeesForLocation(locationId);
+}
+
+async function loadEmployeesForLocation(locationId) {
+    const title = document.getElementById('employees-view-title');
+    const breadcrumb = document.getElementById('breadcrumb-location-link-employees');
+    const body = document.getElementById('employees-view-body');
+    if (!body) return;
+
+    body.innerHTML = '<div style="color: var(--text-muted); padding: 0.75rem;">Cargando empleados...</div>';
+
+    try {
+        const location = await apiRequest(`/api/locations/${locationId}`);
+        if (!location) return;
+
+        // Mantener cache local actualizado
+        locations = (locations || []).map(l => (String(l._id) === String(locationId) ? location : l));
+
+        const res = await apiRequest(`/api/locations/${locationId}/employees`);
+        const employees = res && Array.isArray(res.employees) ? res.employees : [];
+
+        employeesViewLocation = location;
+        employeesViewEmployees = employees;
+
+        if (title) title.textContent = `👥 Empleados · ${location.name}`;
+        if (breadcrumb) breadcrumb.textContent = location.name;
+
+        const btnExport = document.getElementById('btn-export-employees-location');
+        if (btnExport) btnExport.style.display = (currentUser && currentUser.role === 'admin') ? 'inline-flex' : 'none';
+
+        const sel = document.getElementById('employee-export-stores-location');
+        if (sel) {
+            sel.style.display = (currentUser && currentUser.role === 'admin') ? 'block' : 'none';
+            populateLocationStoreMultiSelect();
+        }
+
+        renderEmployeesView();
+    } catch (error) {
+        console.error('Error cargando empleados por ubicación:', error);
+        body.innerHTML = '<div class="empty-state"><div class="empty-state-text">No se pudieron cargar los empleados</div></div>';
+    }
+}
+
+function populateLocationStoreMultiSelect() {
+    const sel = document.getElementById('employee-export-stores-location');
+    if (!sel || !employeesViewLocation) return;
+
+    const prevSelected = new Set(Array.from(sel.selectedOptions || []).map(o => String(o.value)));
+
+    const stores = (Array.isArray(employeesViewLocation.stores) ? employeesViewLocation.stores : [])
+        .map(s => String(s && s.name ? s.name : '').trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, 'es'));
+
+    sel.innerHTML = '';
+    for (const name of stores) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (prevSelected.has(name)) opt.selected = true;
+        sel.appendChild(opt);
+    }
+}
+
+function getSelectedValues(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return [];
+    return Array.from(sel.selectedOptions || []).map(o => String(o.value || '').trim()).filter(Boolean);
+}
+
+function formatDateTimeForPdf(d = new Date()) {
+    const dt = new Date(d);
+    if (Number.isNaN(dt.getTime())) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mm = String(dt.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} ${hh}:${mm}`;
+}
+
+function safeFileToken(value) {
+    return String(value || '').trim().replace(/[^\w\-.]+/g, '_').slice(0, 80) || 'documento';
+}
+
+function ensurePdfReady() {
+    if (!window.jspdf) {
+        showError('Error: La librería PDF no está cargada.');
+        return false;
+    }
+    if (typeof reportsUtil === 'undefined' || !reportsUtil) {
+        showError('Error: Utilidades de PDF no disponibles.');
+        return false;
+    }
+    return true;
+}
+
+async function exportEmployeesPdfForCurrentLocation() {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!employeesViewLocation || !employeesViewLocation._id) return;
+    if (!ensurePdfReady()) return;
+
+    try {
+        showLoading('Generando PDF...');
+        await reportsUtil.loadConfig();
+
+        const locationId = String(employeesViewLocation._id);
+        const locationName = String(employeesViewLocation.name || 'Ubicación');
+
+        // Refrescamos datos para exportar lo más reciente
+        const res = await apiRequest(`/api/locations/${locationId}/employees`);
+        let employees = res && Array.isArray(res.employees) ? res.employees : [];
+
+        const selectedStores = getSelectedValues('employee-export-stores-location');
+        if (selectedStores.length > 0) {
+            const set = new Set(selectedStores.map(s => normalizeForCompare(s)));
+            employees = employees.filter(e => set.has(normalizeForCompare(e && e.location ? e.location : '')));
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text(`EMPLEADOS · ${locationName}`, 14, 14);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(`Generado: ${formatDateTimeForPdf(new Date())}`, 14, 20);
+
+        const head = [["Nombre", "DNI", "Puesto", "Estado", "Tienda/Fábrica"]];
+        const body = (employees || []).map(e => {
+            const status = e.status === 'active' ? 'Activo' : (e.status === 'on_leave' ? 'Baja' : (e.status || ''));
+            return [
+                String(e.full_name || e.name || ''),
+                String(e.dni || ''),
+                String(e.position || ''),
+                String(status),
+                String(e.location || '')
+            ];
+        });
+
+        if (body.length === 0) {
+            doc.setFontSize(10);
+            doc.text('Sin empleados en esta ubicación.', 14, 30);
+        } else {
+            doc.autoTable({
+                head,
+                body,
+                startY: 26,
+                styles: { font: 'helvetica', fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+                headStyles: {
+                    fillColor: reportsUtil.config.secondaryColor || [30, 41, 59],
+                    textColor: [255, 255, 255]
+                },
+                columnStyles: {
+                    0: { cellWidth: 55 },
+                    1: { cellWidth: 22 },
+                    2: { cellWidth: 38 },
+                    3: { cellWidth: 18 },
+                    4: { cellWidth: 45 }
+                },
+                margin: { left: 10, right: 10 }
+            });
+        }
+
+        const suffix = (getSelectedValues('employee-export-stores-location').length > 0) ? '_filtrado' : '';
+        await reportsUtil.savePdf(doc, `Empleados_${safeFileToken(locationName)}${suffix}.pdf`);
+        hideLoading();
+    } catch (error) {
+        hideLoading();
+        console.error('Error exportando PDF por ubicación:', error);
+        showError('No se pudo exportar el PDF: ' + (error?.message || 'Error desconocido'));
+    }
+}
+
+async function exportEmployeesPdfForAllLocations() {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!ensurePdfReady()) return;
+
+    try {
+        showLoading('Generando PDF...');
+        await reportsUtil.loadConfig();
+
+        const all = await apiRequest('/api/locations');
+        const allLocations = Array.isArray(all) ? all : [];
+
+        const selectedStores = getSelectedValues('employee-export-stores-all');
+        const selectedStoreSet = new Set(selectedStores.map(s => normalizeForCompare(s)));
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text('EMPLEADOS POR UBICACIÓN', 14, 14);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.text(`Generado: ${formatDateTimeForPdf(new Date())}`, 14, 20);
+
+        let cursorY = 28;
+
+        const head = [["Nombre", "DNI", "Puesto", "Estado", "Tienda/Fábrica"]];
+
+        for (const loc of allLocations) {
+            if (!loc || !loc._id) continue;
+            const locName = String(loc.name || 'Ubicación');
+
+            // Si estamos muy abajo, nueva página
+            if (cursorY > 265) {
+                doc.addPage();
+                cursorY = 14;
+            }
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(11);
+            doc.text(locName, 14, cursorY);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+
+            const res = await apiRequest(`/api/locations/${String(loc._id)}/employees`);
+            let employees = res && Array.isArray(res.employees) ? res.employees : [];
+
+            if (selectedStores.length > 0) {
+                employees = employees.filter(e => selectedStoreSet.has(normalizeForCompare(e && e.location ? e.location : '')));
+            }
+
+            const body = (employees || []).map(e => {
+                const status = e.status === 'active' ? 'Activo' : (e.status === 'on_leave' ? 'Baja' : (e.status || ''));
+                return [
+                    String(e.full_name || e.name || ''),
+                    String(e.dni || ''),
+                    String(e.position || ''),
+                    String(status),
+                    String(e.location || '')
+                ];
+            });
+
+            if (body.length === 0) {
+                doc.setTextColor(100);
+                doc.text('Sin empleados.', 14, cursorY + 6);
+                doc.setTextColor(0);
+                cursorY += 12;
+                continue;
+            }
+
+            doc.autoTable({
+                head,
+                body,
+                startY: cursorY + 4,
+                styles: { font: 'helvetica', fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+                headStyles: {
+                    fillColor: reportsUtil.config.secondaryColor || [30, 41, 59],
+                    textColor: [255, 255, 255]
+                },
+                columnStyles: {
+                    0: { cellWidth: 55 },
+                    1: { cellWidth: 22 },
+                    2: { cellWidth: 38 },
+                    3: { cellWidth: 18 },
+                    4: { cellWidth: 45 }
+                },
+                margin: { left: 10, right: 10 },
+                pageBreak: 'auto'
+            });
+
+            cursorY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : (cursorY + 20)) + 10;
+        }
+
+        const suffix = selectedStores.length > 0 ? '_filtrado' : '';
+        await reportsUtil.savePdf(doc, `Empleados_por_ubicacion_${safeFileToken(formatDateTimeForPdf(new Date()).slice(0, 10))}${suffix}.pdf`);
+        hideLoading();
+    } catch (error) {
+        hideLoading();
+        console.error('Error exportando PDF (todas):', error);
+        showError('No se pudo exportar el PDF: ' + (error?.message || 'Error desconocido'));
+    }
+}
+
+function getAllStoresAsTargets() {
+    const out = [];
+    for (const loc of (Array.isArray(locations) ? locations : [])) {
+        if (!loc) continue;
+        const stores = Array.isArray(loc.stores) ? loc.stores : [];
+        for (const s of stores) {
+            if (!s || !s.name) continue;
+            out.push({
+                locationId: String(loc._id),
+                locationName: String(loc.name || ''),
+                storeId: String(s._id),
+                storeName: String(s.name || '')
+            });
+        }
+    }
+    // Deduplicar por nombre de tienda
+    const byName = new Map();
+    for (const it of out) {
+        const key = normalizeForCompare(it.storeName);
+        if (!byName.has(key)) byName.set(key, it);
+    }
+    return Array.from(byName.values()).sort((a, b) => {
+        const lc = String(a.locationName).localeCompare(String(b.locationName), 'es');
+        if (lc !== 0) return lc;
+        return String(a.storeName).localeCompare(String(b.storeName), 'es');
+    });
+}
+
+function renderEmployeesView() {
+    const body = document.getElementById('employees-view-body');
+    if (!body || !employeesViewLocation) return;
+
+    const loc = employeesViewLocation;
+    const employees = Array.isArray(employeesViewEmployees) ? employeesViewEmployees : [];
+    const targets = getAllStoresAsTargets();
+
+    const employeesHtml = employees.length
+        ? employees
+            .slice()
+            .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || ''), 'es'))
+            .map(e => {
+                const eid = String(e._id);
+                const name = escapeHtml(e.full_name || 'Empleado');
+                const dni = escapeHtml(e.dni || '-');
+                const pos = escapeHtml(e.position || '-');
+                const store = escapeHtml(e.location || '-');
+                return `
+                    <div class="employee-move-employee" draggable="true" data-employee-id="${eid}" data-from-store="${escapeHtml(e.location || '')}" title="Arrastra para mover">
+                        <div class="employee-move-name">👤 ${name}</div>
+                        <div class="employee-move-meta">
+                            <span>🪪 ${dni}</span>
+                            <span>💼 ${pos}</span>
+                            <span>🏪 ${store}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('')
+        : '<div style="color: var(--text-muted); padding: var(--spacing-md);">No hay empleados en esta ubicación</div>';
+
+    const targetsHtml = targets.length
+        ? targets.map(t => {
+            const label = escapeHtml(`${t.locationName} · ${t.storeName}`);
+            return `
+                <div class="employee-move-target" data-target-store="${escapeHtml(t.storeName)}" title="${label}">
+                    <div class="store-move-target-title">🏪 ${label}</div>
+                    <div class="store-move-target-subtitle">Suelta aquí para mover</div>
+                </div>
+            `;
+        }).join('')
+        : '<div style="color: var(--text-muted); padding: var(--spacing-md);">No hay tiendas destino disponibles</div>';
+
+    body.innerHTML = `
+        <div class="store-move-panel">
+            <div class="store-move-panel-title">Empleados en ${escapeHtml(loc.name || '')}</div>
+            <div class="employee-move-list">${employeesHtml}</div>
+        </div>
+        <div class="store-move-panel">
+            <div class="store-move-panel-title">Mover a tienda / fábrica</div>
+            <div class="employee-move-targets">${targetsHtml}</div>
+        </div>
+    `;
+
+    body.querySelectorAll('.employee-move-employee').forEach(el => {
+        el.addEventListener('dragstart', (e) => {
+            const employeeId = el.getAttribute('data-employee-id');
+            const fromStoreName = el.getAttribute('data-from-store') || '';
+            const payload = { employeeId, fromStoreName };
+            try {
+                e.dataTransfer.setData('application/json', JSON.stringify(payload));
+            } catch {
+                e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+            }
+            e.dataTransfer.effectAllowed = 'move';
+            el.classList.add('dragging');
+        });
+        el.addEventListener('dragend', () => {
+            el.classList.remove('dragging');
+        });
+    });
+
+    body.querySelectorAll('.employee-move-target').forEach(targetEl => {
+        targetEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            targetEl.classList.add('drag-over');
+        });
+        targetEl.addEventListener('dragleave', () => {
+            targetEl.classList.remove('drag-over');
+        });
+        targetEl.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            targetEl.classList.remove('drag-over');
+
+            let raw = '';
+            try {
+                raw = e.dataTransfer.getData('application/json');
+            } catch {
+                raw = '';
+            }
+            if (!raw) raw = e.dataTransfer.getData('text/plain');
+
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                return;
+            }
+
+            const employeeId = data && data.employeeId;
+            const toStoreName = targetEl.getAttribute('data-target-store');
+            if (!employeeId || !toStoreName) return;
+
+            await moveEmployeeToStore({ employeeId, toStoreName });
+        });
+    });
 }
 
 // ==================== MODAL - UBICACIÓN ====================
@@ -876,688 +1326,228 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-/*
-// Estado de la aplicación
-let currentView = 'locations';
-let currentLocationId = null;
-let currentStoreId = null;
-let currentYear = new Date().getFullYear();
-let currentUser = null;
-let locations = [];
-
-// Meses en español
-const MONTHS = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-];
-
-// Wrapper compatible (había código que llamaba apiRequest(path, method, data)).
-// Internamente reutiliza callAPI() de public/js/api.js.
-async function apiRequest(urlOrPath, method = 'GET', data) {
-    let url = urlOrPath;
-    if (typeof url === 'string' && url.startsWith('/api/')) {
-        url = `${API_URL}${url.slice(4)}`; // /api/locations -> ${API_URL}/locations
-    }
-
-    const options = {};
-    const upperMethod = (method || 'GET').toUpperCase();
-    if (upperMethod !== 'GET') {
-        options.method = upperMethod;
-    }
-    if (data !== undefined && upperMethod !== 'GET') {
-        options.body = JSON.stringify(data);
-    }
-
-    return callAPI(url, options);
+function normalizeForCompare(value) {
+    const s = (value == null ? '' : String(value)).trim();
+    if (!s) return '';
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-// Inicialización
-document.addEventListener('DOMContentLoaded', async () => {
-    currentUser = getUser();
-    
-    if (!currentUser) {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    // Mostrar nombre de usuario
-    document.getElementById('navbar-username').textContent = currentUser.name || currentUser.username;
-
-    // Cargar branding
-    if (typeof loadBranding === 'function') {
-        await loadBranding();
-    }
-
-    // Verificar permisos
-    if (currentUser.role !== 'admin' && currentUser.role !== 'store_coordinator') {
-        alert('No tienes permisos para acceder a esta sección');
-        window.location.href = 'employee-dashboard.html';
-        return;
-    }
-
-    // Configurar selector de año
-    setupYearSelector();
-
-    // Configurar event listeners
-    setupEventListeners();
-
-    // Cargar ubicaciones
-    await loadLocations();
-});
-
-function setupEventListeners() {
-    // Botones de añadir
-    document.getElementById('btn-add-location').addEventListener('click', () => openLocationModal());
-    document.getElementById('btn-add-store').addEventListener('click', () => openStoreModal());
-    document.getElementById('btn-add-holiday').addEventListener('click', () => openHolidayModal());
-
-    // Formularios
-    document.getElementById('location-form').addEventListener('submit', handleLocationSubmit);
-    document.getElementById('store-form').addEventListener('submit', handleStoreSubmit);
-    document.getElementById('holiday-form').addEventListener('submit', handleHolidaySubmit);
-
-    // Selector de año
-    document.getElementById('year-selector').addEventListener('change', (e) => {
-        currentYear = parseInt(e.target.value);
-        loadCalendar();
-    });
-
-    // Cerrar modales al hacer clic fuera
-    window.addEventListener('click', (event) => {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
-        }
-    });
+function isFactoryName(value) {
+    const normalized = normalizeForCompare(value);
+    if (!normalized) return false;
+    return normalized.includes('fabrica') || normalized.includes('factory');
 }
+// ==================== ADMIN: GESTIÓN DRAG & DROP ====================
 
-function setupYearSelector() {
-    const selector = document.getElementById('year-selector');
-    const currentYear = new Date().getFullYear();
-    
-    for (let year = currentYear - 2; year <= currentYear + 5; year++) {
-        const option = document.createElement('option');
-        option.value = year;
-        option.textContent = year;
-        if (year === currentYear) option.selected = true;
-        selector.appendChild(option);
-    }
-}
+let storeMoveFromLocation = null; // { _id, name, stores: [...] }
 
-// ==================== CARGAR DATOS ====================
+// ==================== ADMIN: DRAG & DROP EMPLEADOS ====================
 
-async function loadLocations() {
+async function moveEmployeeToStore({ employeeId, toStoreName }) {
     try {
-        showLoading('Cargando ubicaciones...');
-        const data = await callAPI(`${API_URL}/locations`);
-        
-        if (!data) {
+        showLoading('Moviendo empleado...');
+        const res = await apiRequest(`/api/employees/${employeeId}/move-store`, 'POST', { toStoreName });
+        if (!res) {
             hideLoading();
             return;
         }
-        
-        locations = data;
-        
-        renderLocations();
-        hideLoading();
 
-        // Mostrar botón de añadir ubicación solo para admin
-        if (currentUser.role === 'admin') {
-            document.getElementById('btn-add-location').style.display = 'block';
+        // Refrescar lista de empleados de la vista
+        const locId = employeesViewLocation && employeesViewLocation._id;
+        if (locId) {
+            const refreshed = await apiRequest(`/api/locations/${locId}/employees`);
+            employeesViewEmployees = refreshed && Array.isArray(refreshed.employees) ? refreshed.employees : [];
         }
+        renderEmployeesView();
+        hideLoading();
+        showSuccess('Empleado movido correctamente');
     } catch (error) {
         hideLoading();
-        console.error('Error cargando ubicaciones:', error);
-        showError('Error al cargar ubicaciones: ' + (error.message || 'Error desconocido'));
+        console.error('Error moviendo empleado:', error);
+        showError('No se pudo mover el empleado: ' + (error?.message || 'Error desconocido'));
     }
 }
 
-async function loadStores(locationId) {
+async function openStoreMoveModal(locationId) {
+    if (!currentUser || currentUser.role !== 'admin') return;
+
+    const modal = document.getElementById('store-move-modal');
+    const title = document.getElementById('store-move-modal-title');
+    const body = document.getElementById('store-move-modal-body');
+    if (!modal || !title || !body) return;
+
     try {
-        showLoading('Cargando tiendas...');
-        const location = await callAPI(`${API_URL}/locations/${locationId}`);
-        
+        showLoading('Cargando gestor de tiendas...');
+        const location = await apiRequest(`/api/locations/${locationId}`);
         if (!location) {
             hideLoading();
             return;
         }
-        
-        currentLocationId = locationId;
-        
-        renderStores(location);
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        console.error('Error cargando tiendas:', error);
-        showError('Error al cargar tiendas: ' + (error.message || 'Error desconocido'));
-    }callAPI(
-            `${API_URL}/locations/${currentLocationId}/stores/${currentStoreId}/calendar/${currentYear}`
-        );
-        
-        if (!data) {
+
+        // Solo permitimos gestionar tiendas no-fábrica
+        if (isFactoryName(location?.name)) {
             hideLoading();
+            showError('No se permite gestionar tiendas de Fábrica desde aquí');
             return;
         }
-async function loadCalendar() {
-    try {
-        showLoading('Cargando calendario...');
-        const data = await apiRequest(
-            `/api/locations/${currentLocationId}/stores/${currentStoreId}/calendar/${currentYear}`
-        );
-        
-        renderCalendar(data);
+
+        storeMoveFromLocation = location;
+        title.textContent = `Gestionar tiendas · ${location.name}`;
+        modal.classList.add('active');
+        renderStoreMoveModal();
         hideLoading();
     } catch (error) {
         hideLoading();
-        console.error('Error cargando calendario:', error);
-        showError('Error al cargar calendario: ' + (error.message || 'Error desconocido'));
+        console.error('Error abriendo gestor de tiendas:', error);
+        showError('No se pudo abrir el gestor: ' + (error?.message || 'Error desconocido'));
     }
 }
 
-// ==================== RENDERIZADO ====================
+function closeStoreMoveModal() {
+    const modal = document.getElementById('store-move-modal');
+    if (modal) modal.classList.remove('active');
+    storeMoveFromLocation = null;
+}
 
-function renderLocations() {
-    const container = document.getElementById('locations-container');
-    
-    if (!locations || locations.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">📍</div>
-                <div class="empty-state-text">No hay ubicaciones disponibles</div>
-                ${currentUser.role === 'admin' ? 
-                    '<button class="btn btn-primary" onclick="openLocationModal()">➕ Crear Primera Ubicación</button>' : ''}
-            </div>
-        `;
-        return;
-    }
+function renderStoreMoveModal() {
+    const body = document.getElementById('store-move-modal-body');
+    if (!body || !storeMoveFromLocation) return;
 
-    container.innerHTML = locations.map(location => {
-        const storeCount = location.stores ? location.stores.length : 0;
-        
-        return `
-            <div class="location-card" onclick="showStoresView('${location._id}')">
-                <div class="location-card-header">
-                    <h3 class="location-card-title">📍 ${escapeHtml(location.name)}</h3>
-                    ${currentUser.role === 'admin' ? `
-                        <button class="btn btn-secondary btn-icon" onclick="event.stopPropagation(); editLocation('${location._id}')" title="Editar">
-                            ✏️
-                        </button>
-                    ` : ''}
-                </div>
-                ${location.description ? `
-                    <div class="location-card-description">${escapeHtml(location.description)}</div>
-                ` : ''}
-                <div class="location-card-stats">
-                    <div class="location-card-stat">
+    const from = storeMoveFromLocation;
+    const stores = (Array.isArray(from.stores) ? from.stores : [])
+        .filter(s => !isFactoryName(s?.name));
+    const otherLocations = (Array.isArray(locations) ? locations : [])
+        .filter(l => String(l._id) !== String(from._id))
+        .filter(l => !isFactoryName(l?.name));
+
+    const storesHtml = stores.length
+        ? stores
+            .slice()
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
+            .map(store => {
+                const sid = String(store._id);
+                const sname = escapeHtml(store.name || '');
+                return `
+                    <div class="store-move-store" draggable="true" data-store-id="${sid}" title="Arrastra para mover">
                         <span>🏪</span>
-                        <span>${storeCount} ${storeCount === 1 ? 'tienda' : 'tiendas'}</span>
+                        <span class="store-move-store-name">${sname}</span>
                     </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
+                `;
+            }).join('')
+        : '<div style="color: var(--text-muted); padding: var(--spacing-md);">No hay tiendas no-fábrica en esta ubicación</div>';
 
-function renderStores(location) {
-    const container = document.getElementById('stores-container');
-    const title = document.getElementById('stores-view-title');
-    const breadcrumb = document.getElementById('breadcrumb-location-name');
-    
-    title.textContent = `🏪 Tiendas en ${location.name}`;
-    breadcrumb.textContent = location.name;
-
-    if (!location.stores || location.stores.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-state-icon">🏪</div>
-                <div class="empty-state-text">No hay tiendas en esta ubicación</div>
-                ${currentUser.role === 'admin' ? 
-                    '<button class="btn btn-primary" onclick="openStoreModal()">➕ Añadir Primera Tienda</button>' : ''}
-            </div>
-        `;
-        return;
-    }
-
-    container.innerHTML = location.stores.map(store => `
-        <div class="store-card" onclick="showCalendarView('${location._id}', '${store._id}')">
-            <div style="display: flex; justify-content: space-between; align-items: start;">
-                <div style="flex: 1;">
-                    <div class="store-card-title">🏪 ${escapeHtml(store.name)}</div>
-                    ${store.address ? `
-                        <div class="store-card-address">📍 ${escapeHtml(store.address)}</div>
-                    ` : ''}
-                    <div style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);">
-                        ${store.localHolidays ? store.localHolidays.length : 0} festivos locales
+    const targetsHtml = otherLocations.length
+        ? otherLocations
+            .slice()
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
+            .map(loc => {
+                const lid = String(loc._id);
+                const lname = escapeHtml(loc.name || '');
+                return `
+                    <div class="store-move-target" data-target-location-id="${lid}">
+                        <div class="store-move-target-title">📍 ${lname}</div>
+                        <div class="store-move-target-subtitle">Suelta aquí para mover</div>
                     </div>
-                </div>
-                ${currentUser.role === 'admin' ? `
-                    <button class="btn btn-secondary btn-icon" 
-                            onclick="event.stopPropagation(); editStore('${location._id}', '${store._id}')" 
-                            title="Editar">
-                        ✏️
-                    </button>
-                ` : ''}
-            </div>
+                `;
+            }).join('')
+        : '<div style="color: var(--text-muted); padding: var(--spacing-md);">No hay otras ubicaciones disponibles</div>';
+
+    body.innerHTML = `
+        <div class="store-move-panel">
+            <div class="store-move-panel-title">Tiendas en ${escapeHtml(from.name || '')}</div>
+            <div id="store-move-store-list" class="store-move-list">${storesHtml}</div>
         </div>
-    `).join('');
-
-    // Mostrar botón de añadir tienda solo para admin
-    if (currentUser.role === 'admin') {
-        document.getElementById('btn-add-store').style.display = 'block';
-    }
-}
-
-function renderCalendar(data) {
-    const title = document.getElementById('calendar-store-title');
-    const breadcrumbLocation = document.getElementById('breadcrumb-location-link');
-    const breadcrumbStore = document.getElementById('breadcrumb-store-name');
-    const container = document.getElementById('calendar-grid');
-
-    title.textContent = `📅 ${data.storeName} - ${data.year}`;
-    breadcrumbLocation.textContent = data.locationName;
-    breadcrumbStore.textContent = data.storeName;
-
-    // Agrupar festivos por mes
-    const holidaysByMonth = {};
-    for (let i = 0; i < 12; i++) {
-        holidaysByMonth[i] = [];
-    }
-
-    data.holidays.forEach(holiday => {
-        const date = new Date(holiday.date);
-        const month = date.getMonth();
-        holidaysByMonth[month].push(holiday);
-    });
-
-    // Renderizar meses
-    container.innerHTML = MONTHS.map((monthName, index) => {
-        const monthHolidays = holidaysByMonth[index];
-        
-        return `
-            <div class="month-section">
-                <div class="month-title">${monthName}</div>
-                ${monthHolidays.length === 0 ? 
-                    '<div style="color: var(--text-secondary); font-size: 0.85rem; padding: 0.5rem;">Sin festivos</div>' :
-                    monthHolidays.map(holiday => renderHolidayItem(holiday)).join('')
-                }
-            </div>
-        `;
-    }).join('');
-}
-
-function renderHolidayItem(holiday) {
-    const date = new Date(holiday.date);
-    const dateStr = `${date.getDate()}/${date.getMonth() + 1}`;
-    const isLocal = holiday.type === 'local';
-    const isEditable = isLocal && (currentUser.role === 'admin' || currentUser.role === 'store_coordinator');
-
-    return `
-        <div class="holiday-item ${holiday.type}">
-            <span class="holiday-date">${dateStr}</span>
-            <span class="holiday-name" title="${escapeHtml(holiday.name)}">${escapeHtml(holiday.name)}</span>
-            <span class="holiday-type ${holiday.type}">${isLocal ? 'Local' : 'Nacional'}</span>
-            ${isEditable ? `
-                <div class="holiday-actions">
-                    <button class="btn btn-secondary btn-icon" 
-                            onclick="editHoliday('${holiday._id}')" 
-                            title="Editar">
-                        ✏️
-                    </button>
-                    <button class="btn btn-danger btn-icon" 
-                            onclick="deleteHoliday('${holiday._id}')" 
-                            title="Eliminar">
-                        🗑️
-                    </button>
-                </div>
-            ` : ''}
+        <div class="store-move-panel">
+            <div class="store-move-panel-title">Mover a otra ubicación</div>
+            <div id="store-move-target-list" class="store-move-targets">${targetsHtml}</div>
         </div>
     `;
+
+    // Drag sources
+    body.querySelectorAll('.store-move-store').forEach(el => {
+        el.addEventListener('dragstart', (e) => {
+            const storeId = el.getAttribute('data-store-id');
+            const payload = {
+                storeId,
+                fromLocationId: String(from._id)
+            };
+            try {
+                e.dataTransfer.setData('application/json', JSON.stringify(payload));
+            } catch {
+                e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+            }
+            e.dataTransfer.effectAllowed = 'move';
+            el.classList.add('dragging');
+        });
+        el.addEventListener('dragend', () => {
+            el.classList.remove('dragging');
+        });
+    });
+
+    // Drop targets
+    body.querySelectorAll('.store-move-target').forEach(targetEl => {
+        targetEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            targetEl.classList.add('drag-over');
+        });
+        targetEl.addEventListener('dragleave', () => {
+            targetEl.classList.remove('drag-over');
+        });
+        targetEl.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            targetEl.classList.remove('drag-over');
+
+            let raw = '';
+            try {
+                raw = e.dataTransfer.getData('application/json');
+            } catch {
+                raw = '';
+            }
+            if (!raw) {
+                raw = e.dataTransfer.getData('text/plain');
+            }
+
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                return;
+            }
+
+            const toLocationId = targetEl.getAttribute('data-target-location-id');
+            const storeId = data && data.storeId;
+            const fromLocationId = data && data.fromLocationId;
+            if (!toLocationId || !storeId || !fromLocationId) return;
+            if (String(toLocationId) === String(fromLocationId)) return;
+
+            await moveStoreBetweenLocations({ fromLocationId, storeId, toLocationId });
+        });
+    });
 }
 
-// ==================== NAVEGACIÓN ====================
-
-function showLocationsView() {
-    currentView = 'locations';
-    currentLocationId = null;
-    currentStoreId = null;
-    
-    document.getElementById('locations-view').style.display = 'block';
-    document.getElementById('stores-view').style.display = 'none';
-    document.getElementById('calendar-view').style.display = 'none';
-    
-    loadLocations();
-}
-
-function showStoresView(locationId) {
+async function moveStoreBetweenLocations({ fromLocationId, storeId, toLocationId }) {
     try {
-        showLoading('Cargando tiendas...');
-        const location = await apiRequest(`/api/locations/${locationId}`);
-
-        if (!location) {
+        showLoading('Moviendo tienda...');
+        const res = await apiRequest(
+            `/api/locations/${fromLocationId}/stores/${storeId}/move`,
+            'POST',
+            { toLocationId }
+        );
+        if (!res) {
             hideLoading();
             return;
         }
 
-        currentLocationId = locationId;
-        renderStores(location);
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        console.error('Error cargando tiendas:', error);
-        showError('Error al cargar tiendas: ' + (error.message || 'Error desconocido'));
-    }
-        showStoresView(currentLocationId);
-
-async function loadCalendar() {
-    try {
-        showLoading('Cargando calendario...');
-        const data = await apiRequest(
-            `/api/locations/${currentLocationId}/stores/${currentStoreId}/calendar/${currentYear}`
-        );
-
-        if (!data) {
-            hideLoading();
-            return;
-        }
-
-        renderCalendar(data);
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        console.error('Error cargando calendario:', error);
-        showError('Error al cargar calendario: ' + (error.message || 'Error desconocido'));
-    }
-}
-        if (location) {
-            document.getElementById('location-name').value = location.name;
-            document.getElementById('location-description').value = location.description || '';
-        }
-    } else {
-        title.textContent = 'Nueva Ubicación';
-    }
-    
-    modal.style.display = 'block';
-}
-
-function closeLocationModal() {
-    document.getElementById('location-modal').style.display = 'none';
-}
-
-async function handleLocationSubmit(e) {
-    e.preventDefault();
-    
-    const locationId = document.getElementById('location-id').value;
-    const name = document.getElementById('location-name').value.trim();
-    const description = document.getElementById('location-description').value.trim();
-    
-    if (!name) {
-        showError('El nombre de la ubicación es requerido');
-        return;
-    }
-    
-    try {
-        showLoadincallAPI(`${API_URL}/locations/${locationId}`, 'PUT', data);
-            showSuccess('Ubicación actualizada correctamente');
-        } else {
-            await callAPI(`${API_URL}/locations`
-        if (locationId) {
-            await apiRequest(`/api/locations/${locationId}`, 'PUT', data);
-            showSuccess('Ubicación actualizada correctamente');
-        } else {
-            await apiRequest('/api/locations', 'POST', data);
-            showSuccess('Ubicación creada correctamente');
-        }
-        
-        closeLocationModal();
         await loadLocations();
+        // Refrescar ubicación origen en el modal (ya no contiene la tienda movida)
+        storeMoveFromLocation = await apiRequest(`/api/locations/${fromLocationId}`);
+        renderStoreMoveModal();
         hideLoading();
+        showSuccess('Tienda movida correctamente');
     } catch (error) {
         hideLoading();
-        showError('Error al guardar ubicación: ' + (error.message || 'Error desconocido'));
+        console.error('Error moviendo tienda:', error);
+        showError('No se pudo mover la tienda: ' + (error?.message || 'Error desconocido'));
     }
 }
-
-function editLocation(locationId) {
-    openLocationModal(locationId);
-}
-
-async function deleteLocation(locationId) {
-    if (!confirm('¿Estás seguro de que quieres eliminar esta ubicación? Esta acción no se puede deshacer.')) {
-        returncallAPI(`${API_URL}/locations/${locationId}`, { method: 'DELETE' }
-    }
-    
-    try {
-        showLoading('Eliminando ubicación...');
-        await apiRequest(`/api/locations/${locationId}`, 'DELETE');
-        showSuccess('Ubicación eliminada correctamente');
-        await loadLocations();
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        showError('Error al eliminar ubicación: ' + (error.message || 'Error desconocido'));
-    }
-}
-
-// ==================== MODALES - TIENDA ====================
-
-function openStoreModal(storeId = null) {
-    const modal = document.getElementById('store-modal');
-    const title = document.getElementById('store-modal-title');
-    const form = document.getElementById('store-form');
-    
-    form.reset();
-    document.getElementById('store-id').value = storeId || '';
-    
-    if (storeId) {
-        title.textContent = 'Editar Tienda';
-        const location = locations.find(l => l._id === currentLocationId);
-        if (location) {
-            const store = location.stores.find(s => s._id === storeId);
-            if (store) {
-                document.getElementById('store-name').value = store.name;
-                document.getElementById('store-address').value = store.address || '';
-            }
-        }
-    } else {
-        title.textContent = 'Nueva Tienda';
-    }
-    
-    modal.style.display = 'block';
-}
-
-function closeStoreModal() {
-    document.getElementById('store-modal').style.display = 'none';
-}
-
-async function handleStoreSubmit(e) {
-    e.preventDefault();
-    
-    const storeId = document.getElementById('store-id').value;
-    const name = document.getElementById('store-name').value.trim();
-    const address = document.getElementById('store-address').value.trim();
-    
-    if (!name) {
-        showError('El nombre de la tienda es requerido');
-        return;
-    }
-    
-    try {
-        showLoadincallAPI(`${API_URL}/locations/${currentLocationId}/stores/${storeId}`, {
-                method: 'PUT',
-                body: JSON.stringify(data)
-            });
-            showSuccess('Tienda actualizada correctamente');
-        } else {
-            await callAPI(`${API_URL}/locations/${currentLocationId}/stores`, {
-                method: 'POST',
-                body: JSON.stringify(data)
-            }
-        if (storeId) {
-            await apiRequest(`/api/locations/${currentLocationId}/stores/${storeId}`, 'PUT', data);
-            showSuccess('Tienda actualizada correctamente');
-        } else {
-            await apiRequest(`/api/locations/${currentLocationId}/stores`, 'POST', data);
-            showSuccess('Tienda creada correctamente');
-        }
-        
-        closeStoreModal();
-        await loadStores(currentLocationId);
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        showError('Error al guardar tienda: ' + (error.message || 'Error desconocido'));
-    }
-}
-
-function editStore(locationId, storeId) {
-    currentLocationId = locationId;
-    openStoreModal(storeId);
-}
-
-async function deleteStore(storeId) {
-    if (!conficallAPI(`${API_URL}/locations/${currentLocationId}/stores/${storeId}`, { method: 'DELETE' }de deshacer.')) {
-        return;
-    }
-    
-    try {
-        showLoading('Eliminando tienda...');
-        await apiRequest(`/api/locations/${currentLocationId}/stores/${storeId}`, 'DELETE');
-        showSuccess('Tienda eliminada correctamente');
-        await loadStores(currentLocationId);
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        showError('Error al eliminar tienda: ' + (error.message || 'Error desconocido'));
-    }
-}
-
-// ==================== MODALES - FESTIVO ====================
-
-function openHolidayModal(holidayId = null) {
-    const modal = document.getElementById('holiday-modal');
-    const title = document.getElementById('holiday-modal-title');
-    const form = document.getElementById('holiday-form');
-    
-    form.reset();
-    document.getElementById('holiday-id').value = holidayId || '';
-    
-    if (holidayId) {
-        title.textContent = 'Editar Festivo Local';
-        // Buscar el festivo en los datos actuales
-        // Nota: Necesitarás cargar los datos del festivo si no los tienes
-    } else {
-        title.textContent = 'Añadir Festivo Local';
-        // Establecer año actual por defecto
-        const today = new Date();
-        document.getElementById('holiday-date').value = today.toISOString().split('T')[0];
-    }
-    
-    modal.style.display = 'block';
-}
-
-function closeHolidayModal() {
-    document.getElementById('holiday-modal').style.display = 'none';
-}
-
-async function handleHolidaySubmit(e) {
-    e.preventDefault();
-    
-    const holidayId = document.getElementById('holiday-id').value;
-    const date = document.getElementById('holiday-date').value;
-    const name = document.getElementById('holiday-name').value.trim();
-    const isRecurring = document.getElementById('holiday-recurring').checked;
-    
-    if (!date || !name) {
-        showError('Fecha y nombre son requeridos');
-        return;
-    }
-    
-    try {callAPI(
-                `${API_URL}/locations/${currentLocationId}/stores/${currentStoreId}/holidays/${holidayId}`,
-                {
-                    method: 'PUT',
-                    body: JSON.stringify(data)
-                }
-            );
-            showSuccess('Festivo actualizado correctamente');
-        } else {
-            await callAPI(
-                `${API_URL}/locations/${currentLocationId}/stores/${currentStoreId}/holidays`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify(data)
-                }
-            showSuccess('Festivo actualizado correctamente');
-        } else {
-            await apiRequest(
-                `/api/locations/${currentLocationId}/stores/${currentStoreId}/holidays`,
-                'POST',
-                data
-            );
-            showSuccess('Festivo añadido correctamente');
-        }
-        
-        closeHolidayModal();
-        await loadCalendar();
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        showError('Error al guardar festivo: ' + (error.message || 'Error desconocido'));
-    }
-}
-
-function editHoliday(holidayId) {
-    openHolidacallAPI(
-            `${API_URL}/locations/${currentLocationId}/stores/${currentStoreId}/holidays/${holidayId}`,
-            { method: 'DELETE' }
-async function deleteHoliday(holidayId) {
-    if (!confirm('¿Estás seguro de que quieres eliminar este festivo local?')) {
-        return;
-    }
-    
-    try {
-        showLoading('Eliminando festivo...');
-        await apiRequest(
-            `/api/locations/${currentLocationId}/stores/${currentStoreId}/holidays/${holidayId}`,
-            'DELETE'
-        );
-        showSuccess('Festivo eliminado correctamente');
-        await loadCalendar();
-        hideLoading();
-    } catch (error) {
-        hideLoading();
-        showError('Error al eliminar festivo: ' + (error.message || 'Error desconocido'));
-    }
-}
-
-// ==================== UTILIDADES ====================
-
-function showLoading(message = 'Cargando...') {
-    // Puedes implementar un loader global aquí
-    console.log(message);
-}
-
-function hideLoading() {
-    // Ocultar loader global
-}
-
-function showSuccess(message) {
-    alert('✅ ' + message);
-}
-
-function showError(message) {
-    alert('❌ ' + message);
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function logout() {
-    localStorage.removeItem('token');
-    window.location.href = 'index.html';
-}
-
-*/

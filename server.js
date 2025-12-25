@@ -94,6 +94,7 @@ app.use('/api/settings', require('./src/routes/settings.routes'));
 app.use('/api/locations', require('./src/routes/locations.routes'));
 app.use('/api/audit', require('./src/routes/audit.routes'));
 app.use('/api/reports', require('./src/routes/reports.routes'));
+app.use('/api/quadrants', require('./src/routes/quadrants.routes'));
 
 // Global Error Handler
 app.use((err, req, res, next) => {

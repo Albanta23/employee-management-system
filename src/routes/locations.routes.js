@@ -13,12 +13,71 @@ function normalizeStoreName(value) {
         .toUpperCase();
 }
 
+function normalizeForCompare(value) {
+    const s = (value == null ? '' : String(value)).trim();
+    if (!s) return '';
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function isFactoryName(value) {
+    const normalized = normalizeForCompare(value);
+    if (!normalized) return false;
+    return normalized.includes('fabrica') || normalized.includes('factory');
+}
+
+/**
+ * GET /api/locations/:id/employees
+ * Devuelve empleados de las tiendas de una ubicación (solo admin). Incluye tiendas/fábrica.
+ */
+router.get('/:id/employees', authenticateToken, async (req, res) => {
+    try {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({ error: 'Solo administradores pueden ver empleados por ubicación' });
+        }
+
+        const hasAccess = await requireFeatureAccess(req, res, 'locations');
+        if (!hasAccess) return;
+
+        const location = await Location.findById(req.params.id).lean();
+        if (!location) return res.status(404).json({ error: 'Ubicación no encontrada' });
+
+        const storeNames = (location.stores || [])
+            .map(s => String(s.name || '').trim())
+            .filter(Boolean);
+
+        if (storeNames.length === 0) {
+            return res.json({ employees: [] });
+        }
+
+        const employees = await Employee.find({
+            status: { $ne: 'inactive' },
+            location: { $in: storeNames }
+        })
+            .select('_id full_name dni position location status')
+            .sort({ full_name: 1 })
+            .lean()
+            .maxTimeMS(15000);
+
+        const formattedEmployees = (employees || []).map(e => ({
+            ...e,
+            id: String(e._id),
+            _id: String(e._id)
+        }));
+
+        res.json({ employees: formattedEmployees });
+    } catch (error) {
+        console.error('Error obteniendo empleados por ubicación:', error);
+        res.status(500).json({ error: 'Error al obtener empleados por ubicación' });
+    }
+});
+
 const BOOTSTRAP_LOCATION_NAMES = {
     VALLADOLID: 'VALLADOLID',
     SALAMANCA: 'SALAMANCA',
     TORO: 'TORO',
     FABRICA: 'FABRICA',
-    ZAMORA: 'ZAMORA'
+    ZAMORA: 'ZAMORA',
+    SIN_ASIGNAR: 'SIN ASIGNAR'
 };
 
 // Mapeo solicitado por el usuario:
@@ -26,7 +85,7 @@ const BOOTSTRAP_LOCATION_NAMES = {
 // SALAMANCA1, SALAMANCA2 -> SALAMANCA (incluye tolerancia SALAMANA1/2)
 // HAM -> TORO
 // FABRICA -> FABRICA
-// resto -> ZAMORA
+// resto -> SIN ASIGNAR
 const BOOTSTRAP_STORE_MAP = new Map([
     ['MORADAS BUS', { location: BOOTSTRAP_LOCATION_NAMES.VALLADOLID, storeName: 'MORADAS BUS' }],
     ['CIRCULAR', { location: BOOTSTRAP_LOCATION_NAMES.VALLADOLID, storeName: 'CIRCULAR' }],
@@ -43,7 +102,7 @@ function mapStoreToLocation(rawStoreName) {
     const norm = normalizeStoreName(rawStoreName);
     const hit = BOOTSTRAP_STORE_MAP.get(norm);
     if (hit) return hit;
-    return { location: BOOTSTRAP_LOCATION_NAMES.ZAMORA, storeName: String(rawStoreName || '').trim() };
+    return { location: BOOTSTRAP_LOCATION_NAMES.SIN_ASIGNAR, storeName: String(rawStoreName || '').trim() };
 }
 
 async function bootstrapLocationsFromEmployeesIfEmpty() {
@@ -164,6 +223,114 @@ router.get('/:id', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error obteniendo ubicación:', error);
         res.status(500).json({ error: 'Error al obtener ubicación' });
+    }
+});
+
+/**
+ * POST /api/locations/admin/fix-zamora
+ * Reasigna (solo admin) tiendas que estén dentro de ZAMORA a su ubicación mapeada.
+ * Las no mapeadas pasan a "SIN ASIGNAR".
+ * Esto evita que ZAMORA concentre todas las tiendas por el antiguo fallback.
+ */
+router.post('/admin/fix-zamora', authenticateToken, async (req, res) => {
+    try {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({ error: 'Solo administradores pueden ejecutar esta acción' });
+        }
+
+        const hasAccess = await requireFeatureAccess(req, res, 'locations');
+        if (!hasAccess) return;
+
+        const dryRun = String((req.query && req.query.dryRun) || '').trim() === '1';
+
+        const zamora = await Location.findOne({ name: BOOTSTRAP_LOCATION_NAMES.ZAMORA }).maxTimeMS(15000);
+        if (!zamora) {
+            return res.status(404).json({ error: 'Ubicación ZAMORA no encontrada' });
+        }
+
+        let unassigned = await Location.findOne({ name: BOOTSTRAP_LOCATION_NAMES.SIN_ASIGNAR }).maxTimeMS(15000);
+        if (!unassigned) {
+            unassigned = new Location({ name: BOOTSTRAP_LOCATION_NAMES.SIN_ASIGNAR, description: '', stores: [] });
+        }
+
+        // Índices por nombre normalizado para evitar duplicados.
+        const normSetFor = (doc) => new Set((doc.stores || []).map(s => normalizeStoreName(s.name)));
+        const unassignedNorm = normSetFor(unassigned);
+
+        // Cargar/crear docs destino para ubicaciones canónicas del bootstrap.
+        const destinationDocs = new Map();
+        const destinationNormSets = new Map();
+        for (const locName of Object.values(BOOTSTRAP_LOCATION_NAMES)) {
+            if (!locName || locName === BOOTSTRAP_LOCATION_NAMES.ZAMORA) continue;
+            if (locName === BOOTSTRAP_LOCATION_NAMES.SIN_ASIGNAR) {
+                destinationDocs.set(locName, unassigned);
+                destinationNormSets.set(locName, unassignedNorm);
+                continue;
+            }
+            let doc = await Location.findOne({ name: locName }).maxTimeMS(15000);
+            if (!doc) doc = new Location({ name: locName, description: '', stores: [] });
+            destinationDocs.set(locName, doc);
+            destinationNormSets.set(locName, normSetFor(doc));
+        }
+
+        const moved = [];
+        const kept = [];
+
+        // Reasignamos solo lo que está dentro de ZAMORA.
+        const newZamoraStores = [];
+        for (const store of (zamora.stores || [])) {
+            const storeName = String(store && store.name ? store.name : '').trim();
+            if (!storeName) continue;
+
+            const { location: targetLocation, storeName: canonicalStoreName } = mapStoreToLocation(storeName);
+            const target = String(targetLocation || '').trim();
+            const canonical = String(canonicalStoreName || storeName).trim();
+
+            // Si el target sigue siendo ZAMORA, lo dejamos.
+            if (target === BOOTSTRAP_LOCATION_NAMES.ZAMORA) {
+                newZamoraStores.push({ ...store.toObject(), name: canonical });
+                kept.push({ store: storeName, to: target });
+                continue;
+            }
+
+            const destDoc = destinationDocs.get(target) || unassigned;
+            const destKey = destinationDocs.has(target) ? target : BOOTSTRAP_LOCATION_NAMES.SIN_ASIGNAR;
+            const destNorm = destinationNormSets.get(destKey) || unassignedNorm;
+            const n = normalizeStoreName(canonical);
+
+            if (!destNorm.has(n)) {
+                // Clonamos campos básicos; preservamos address/localHolidays/active si existían.
+                const storeObj = store.toObject ? store.toObject() : { ...store };
+                storeObj.name = canonical;
+                (destDoc.stores = destDoc.stores || []).push(storeObj);
+                destNorm.add(n);
+            }
+
+            moved.push({ store: storeName, to: target });
+        }
+
+        // Actualizar ZAMORA (sin los movidos) y guardar destinos.
+        zamora.stores = newZamoraStores;
+
+        if (!dryRun) {
+            await Promise.all([
+                zamora.save(),
+                ...Array.from(destinationDocs.values()).map(d => d.save())
+            ]);
+        }
+
+        res.json({
+            ok: true,
+            dryRun,
+            movedCount: moved.length,
+            keptCount: kept.length,
+            moved,
+            kept,
+            note: 'Se reasignaron tiendas desde ZAMORA según el bootstrap actual (resto -> SIN ASIGNAR).'
+        });
+    } catch (error) {
+        console.error('Error en fix-zamora:', error);
+        res.status(500).json({ error: 'Error al ejecutar fix-zamora' });
     }
 });
 
@@ -360,6 +527,81 @@ router.put('/:id/stores/:storeId', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Error actualizando tienda:', error);
         res.status(500).json({ error: 'Error al actualizar tienda' });
+    }
+});
+
+/**
+ * POST /api/locations/:id/stores/:storeId/move
+ * Mueve una tienda de una ubicación a otra (solo admin)
+ */
+router.post('/:id/stores/:storeId/move', authenticateToken, async (req, res) => {
+    try {
+        if (!isAdmin(req.user)) {
+            return res.status(403).json({ error: 'Solo administradores pueden mover tiendas' });
+        }
+
+        const { toLocationId } = req.body || {};
+        if (!toLocationId) {
+            return res.status(400).json({ error: 'toLocationId es requerido' });
+        }
+
+        if (String(toLocationId) === String(req.params.id)) {
+            return res.status(400).json({ error: 'La ubicación destino debe ser distinta' });
+        }
+
+        const [fromLocation, toLocation] = await Promise.all([
+            Location.findById(req.params.id),
+            Location.findById(toLocationId)
+        ]);
+
+        if (!fromLocation) {
+            return res.status(404).json({ error: 'Ubicación origen no encontrada' });
+        }
+        if (!toLocation) {
+            return res.status(404).json({ error: 'Ubicación destino no encontrada' });
+        }
+
+        // Bloquear movimientos hacia/desde "Fábrica"
+        if (isFactoryName(fromLocation.name) || isFactoryName(toLocation.name)) {
+            return res.status(400).json({ error: 'No se permite mover tiendas hacia/desde Fábrica' });
+        }
+
+        const store = fromLocation.stores.id(req.params.storeId);
+        if (!store) {
+            return res.status(404).json({ error: 'Tienda no encontrada en la ubicación origen' });
+        }
+
+        const storeName = String(store.name || '').trim();
+        if (!storeName) {
+            return res.status(400).json({ error: 'La tienda no tiene nombre válido' });
+        }
+
+        if (isFactoryName(storeName)) {
+            return res.status(400).json({ error: 'No se permite mover tiendas de Fábrica' });
+        }
+
+        const existsInTarget = (toLocation.stores || []).some(s =>
+            normalizeStoreName(s.name) === normalizeStoreName(storeName)
+        );
+        if (existsInTarget) {
+            return res.status(400).json({ error: 'Ya existe una tienda con ese nombre en la ubicación destino' });
+        }
+
+        const storeObj = store.toObject();
+        fromLocation.stores.pull(store._id);
+        toLocation.stores.push(storeObj);
+
+        await Promise.all([fromLocation.save(), toLocation.save()]);
+
+        res.json({
+            message: 'Tienda movida correctamente',
+            fromLocationId: String(fromLocation._id),
+            toLocationId: String(toLocation._id),
+            storeId: String(storeObj._id)
+        });
+    } catch (error) {
+        console.error('Error moviendo tienda:', error);
+        res.status(500).json({ error: 'Error al mover tienda' });
     }
 });
 

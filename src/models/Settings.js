@@ -71,6 +71,7 @@ const settingsSchema = new mongoose.Schema({
         dashboard: { type: Boolean, default: true },
         employees: { type: Boolean, default: true },
         attendance: { type: Boolean, default: true },
+        quadrants: { type: Boolean, default: true },
         vacations: { type: Boolean, default: true },
         absences: { type: Boolean, default: true },
         permissions: { type: Boolean, default: true },

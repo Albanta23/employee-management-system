@@ -6,6 +6,19 @@ const { authenticateToken } = require('../middleware/auth');
 const bcrypt = require('bcrypt');
 const { requireFeatureAccess, getStoreLocations, getStoreEmployeeIds, ensureEmployeeInScope, isStoreCoordinator } = require('../utils/accessScope');
 const { logAudit, pick, shallowDiff } = require('../utils/audit');
+const Location = require('../models/Location');
+
+function normalizeForCompare(value) {
+    const s = (value == null ? '' : String(value)).trim();
+    if (!s) return '';
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function isFactoryName(value) {
+    const normalized = normalizeForCompare(value);
+    if (!normalized) return false;
+    return normalized.includes('fabrica') || normalized.includes('factory');
+}
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
@@ -528,6 +541,70 @@ router.put('/:id', async (req, res) => {
     } catch (error) {
         console.error('Error al actualizar trabajador:', error);
         res.status(500).json({ error: 'Error al actualizar trabajador' });
+    }
+});
+
+// Mover empleado de una tienda a otra (drag & drop)
+router.post('/:id/move-store', async (req, res) => {
+    try {
+        // Solo admin: el coordinador tiene scope pero no debe reorganizar empleados.
+        if (!req.user || req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Solo administradores pueden mover empleados entre tiendas' });
+        }
+
+        const hasAccess = await requireFeatureAccess(req, res, 'employees');
+        if (!hasAccess) return;
+
+        const { toStoreName } = req.body || {};
+        const targetStoreName = String(toStoreName || '').trim();
+        if (!targetStoreName) {
+            return res.status(400).json({ error: 'toStoreName es requerido' });
+        }
+
+        // Validar que la tienda destino existe
+        const targetLocation = await Location.findOne({
+            active: true,
+            'stores.name': targetStoreName
+        }).lean();
+
+        if (!targetLocation) {
+            return res.status(400).json({ error: 'La tienda destino no existe en Ubicaciones' });
+        }
+
+        const beforeDoc = await Employee.findById(req.params.id).lean();
+        if (!beforeDoc) return res.status(404).json({ error: 'Trabajador no encontrado' });
+
+        const currentStoreName = String(beforeDoc.location || '').trim();
+
+        if (currentStoreName === targetStoreName) {
+            return res.json({ message: 'Sin cambios' });
+        }
+
+        const before = pick(beforeDoc || {}, ['_id', 'location']);
+        const employee = await Employee.findByIdAndUpdate(
+            req.params.id,
+            { $set: { location: targetStoreName } },
+            { new: true }
+        ).lean();
+
+        const after = pick(employee || {}, ['_id', 'location']);
+        const changed = shallowDiff(before, after);
+        await logAudit({
+            req,
+            action: 'employee.move_store',
+            entityType: 'Employee',
+            entityId: String(req.params.id),
+            employeeId: String(req.params.id),
+            employeeLocation: String((employee && employee.location) || ''),
+            before,
+            after,
+            meta: { changed, from: currentStoreName, to: targetStoreName }
+        });
+
+        res.json({ message: 'Empleado movido correctamente' });
+    } catch (error) {
+        console.error('Error moviendo empleado de tienda:', error);
+        res.status(500).json({ error: 'Error al mover empleado' });
     }
 });
 

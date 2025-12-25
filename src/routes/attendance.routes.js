@@ -7,6 +7,12 @@ const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStor
 
 router.use(authenticateToken);
 
+function isAutocloseEnabled() {
+    const v = process.env.ATTENDANCE_AUTOCLOSE_ENABLED;
+    if (v === undefined || v === null || v === '') return true;
+    return String(v).toLowerCase() === 'true' || String(v) === '1';
+}
+
 function startOfDayLocal(date) {
     const d = new Date(date);
     d.setHours(0, 0, 0, 0);
@@ -346,7 +352,10 @@ router.get('/status', async (req, res) => {
         if (!employee_id) return res.json({ todayStatus: 'none' });
 
         // Autocierre de salidas olvidadas en días pasados (sin cron)
-        await autoCloseForgottenOutsForEmployee(employee_id);
+        // Nota: en entornos serverless (Vercel) puede generar muchas lecturas en picos de login.
+        if (isAutocloseEnabled()) {
+            await autoCloseForgottenOutsForEmployee(employee_id);
+        }
 
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
@@ -389,7 +398,10 @@ router.get('/report', async (req, res) => {
             }
 
             // Autocierre de salidas olvidadas en días pasados (sin cron)
-            await autoCloseForgottenOutsForEmployee(req.user.employee_id);
+            // Nota: en entornos serverless (Vercel) puede generar muchas lecturas en picos de login.
+            if (isAutocloseEnabled()) {
+                await autoCloseForgottenOutsForEmployee(req.user.employee_id);
+            }
 
             query.employee_id = req.user.employee_id;
         } else if (req.user.role === 'admin') {

@@ -22,11 +22,29 @@ const connectDB = async () => {
     }
 
     if (!cached.promise) {
+        const maxPoolSizeEnv = Number(process.env.MONGO_MAX_POOL_SIZE);
+        const maxPoolSize = Number.isFinite(maxPoolSizeEnv) && maxPoolSizeEnv > 0 ? maxPoolSizeEnv : 10;
+
+        const serverSelectionTimeoutMsEnv = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS);
+        const serverSelectionTimeoutMS = Number.isFinite(serverSelectionTimeoutMsEnv) && serverSelectionTimeoutMsEnv > 0
+            ? serverSelectionTimeoutMsEnv
+            : 5000;
+
+        const connectTimeoutMsEnv = Number(process.env.MONGO_CONNECT_TIMEOUT_MS);
+        const connectTimeoutMS = Number.isFinite(connectTimeoutMsEnv) && connectTimeoutMsEnv > 0
+            ? connectTimeoutMsEnv
+            : 5000;
+
+        const socketTimeoutMsEnv = Number(process.env.MONGO_SOCKET_TIMEOUT_MS);
+        const socketTimeoutMS = Number.isFinite(socketTimeoutMsEnv) && socketTimeoutMsEnv > 0
+            ? socketTimeoutMsEnv
+            : 45000;
+
         const opts = {
-            serverSelectionTimeoutMS: 5000,
-            connectTimeoutMS: 5000,
-            socketTimeoutMS: 45000,
-            maxPoolSize: 10
+            serverSelectionTimeoutMS,
+            connectTimeoutMS,
+            socketTimeoutMS,
+            maxPoolSize
         };
 
         cached.promise = mongoose.connect(process.env.MONGODB_URI, opts)
