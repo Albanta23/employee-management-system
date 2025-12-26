@@ -7,6 +7,7 @@ const bcrypt = require('bcrypt');
 const { requireFeatureAccess, getStoreLocations, getStoreEmployeeIds, ensureEmployeeInScope, isStoreCoordinator } = require('../utils/accessScope');
 const { logAudit, pick, shallowDiff } = require('../utils/audit');
 const Location = require('../models/Location');
+const logger = require('../utils/logger');
 
 function normalizeForCompare(value) {
     const s = (value == null ? '' : String(value)).trim();
@@ -194,7 +195,13 @@ router.get('/:id', async (req, res) => {
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
         res.json({ ...employee, id: employee._id.toString(), _id: employee._id.toString() });
     } catch (error) {
-        res.status(500).json({ error: 'Error al obtener trabajador' });
+        logger.error('employees_get_by_id_error', {
+            requestId: String(req.requestId || ''),
+            employeeId: String(req.params.id || ''),
+            error: error && error.message ? error.message : String(error),
+            stack: error && error.stack ? String(error.stack).split('\n').slice(0, 8).join('\n') : undefined
+        });
+        res.status(500).json({ error: 'Error al obtener trabajador', requestId: req.requestId });
     }
 });
 
@@ -487,11 +494,38 @@ router.put('/:id', async (req, res) => {
 
         const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, enableAccess, username, password } = req.body;
 
-        const parsedAnnualVacationDays = annual_vacation_days === undefined || annual_vacation_days === null || annual_vacation_days === ''
-            ? undefined
-            : Number(annual_vacation_days);
-        if (parsedAnnualVacationDays !== undefined && (!Number.isFinite(parsedAnnualVacationDays) || parsedAnnualVacationDays < 0)) {
-            return res.status(400).json({ error: 'annual_vacation_days debe ser un número >= 0' });
+        function parseOptionalNumberOrNull(value, fieldName) {
+            if (value === undefined) return { hasValue: false };
+            if (value === null || value === '') return { hasValue: true, value: null };
+            const n = Number(value);
+            if (!Number.isFinite(n)) {
+                return { hasValue: true, error: `${fieldName} debe ser un número válido` };
+            }
+            return { hasValue: true, value: n };
+        }
+
+        function parseOptionalDateOrNull(value, fieldName) {
+            if (value === undefined) return { hasValue: false };
+            if (value === null || value === '') return { hasValue: true, value: null };
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) {
+                return { hasValue: true, error: `${fieldName} debe ser una fecha válida` };
+            }
+            return { hasValue: true, value: d };
+        }
+
+        // Permitir limpiar annual_vacation_days enviando '' o null. Si no se envía, no se toca.
+        let parsedAnnualVacationDays = undefined;
+        let annualVacationDaysWantsNull = false;
+        if (annual_vacation_days !== undefined) {
+            if (annual_vacation_days === null || annual_vacation_days === '') {
+                annualVacationDaysWantsNull = true;
+            } else {
+                parsedAnnualVacationDays = Number(annual_vacation_days);
+                if (!Number.isFinite(parsedAnnualVacationDays) || parsedAnnualVacationDays < 0) {
+                    return res.status(400).json({ error: 'annual_vacation_days debe ser un número >= 0' });
+                }
+            }
         }
 
         if (isStoreCoordinator(req.user) && location) {
@@ -504,10 +538,33 @@ router.put('/:id', async (req, res) => {
         const beforeDoc = await Employee.findById(req.params.id).lean();
         const before = pick(beforeDoc || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days']);
 
-        const update = { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date };
-        if (parsedAnnualVacationDays !== undefined) update.annual_vacation_days = parsedAnnualVacationDays;
+        const update = {};
+        if (full_name !== undefined) update.full_name = full_name;
+        if (dni !== undefined) update.dni = dni;
+        if (phone !== undefined) update.phone = phone;
+        if (email !== undefined) update.email = email;
+        if (position !== undefined) update.position = position;
+        if (location !== undefined) update.location = location;
+        if (status !== undefined) update.status = status;
+        if (notes !== undefined) update.notes = notes;
+        if (convention !== undefined) update.convention = convention;
 
-        const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+        const salaryParsed = parseOptionalNumberOrNull(salary, 'salary');
+        if (salaryParsed.hasValue) {
+            if (salaryParsed.error) return res.status(400).json({ error: salaryParsed.error });
+            update.salary = salaryParsed.value;
+        }
+
+        const hireDateParsed = parseOptionalDateOrNull(hire_date, 'hire_date');
+        if (hireDateParsed.hasValue) {
+            if (hireDateParsed.error) return res.status(400).json({ error: hireDateParsed.error });
+            update.hire_date = hireDateParsed.value;
+        }
+
+        if (annualVacationDaysWantsNull) update.annual_vacation_days = null;
+        else if (parsedAnnualVacationDays !== undefined) update.annual_vacation_days = parsedAnnualVacationDays;
+
+        const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true, context: 'query' }).lean();
 
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
 
@@ -539,8 +596,19 @@ router.put('/:id', async (req, res) => {
         res.json({ message: 'Trabajador actualizado correctamente' });
 
     } catch (error) {
-        console.error('Error al actualizar trabajador:', error);
-        res.status(500).json({ error: 'Error al actualizar trabajador' });
+        logger.error('employees_update_error', {
+            requestId: String(req.requestId || ''),
+            employeeId: String(req.params.id || ''),
+            error: error && error.message ? error.message : String(error),
+            name: error && error.name ? String(error.name) : undefined,
+            stack: error && error.stack ? String(error.stack).split('\n').slice(0, 8).join('\n') : undefined
+        });
+
+        if (error && (error.name === 'CastError' || error.name === 'ValidationError')) {
+            return res.status(400).json({ error: error.message || 'Datos inválidos', requestId: req.requestId });
+        }
+
+        res.status(500).json({ error: 'Error al actualizar trabajador', requestId: req.requestId });
     }
 });
 

@@ -7,6 +7,10 @@ const Employee = require('../models/Employee');
 const { authenticateToken } = require('../middleware/auth');
 require('dotenv').config();
 
+function getJwtSecret() {
+    return process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || process.env.JWT_KEY;
+}
+
 function normalizeDni(value) {
     return String(value || '').trim().toUpperCase();
 }
@@ -33,7 +37,15 @@ const verifyChangeToken = (req, res, next) => {
         return res.status(401).json({ error: 'Token de autorización requerido' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    const secret = getJwtSecret();
+    if (!secret) {
+        return res.status(500).json({
+            error: 'Configuración del servidor incompleta (JWT_SECRET)',
+            code: 'SERVER_MISCONFIG'
+        });
+    }
+
+    jwt.verify(token, secret, (err, decoded) => {
         // Verificamos que el token sea específicamente para cambiar contraseña
         if (err || decoded.purpose !== 'change-password') {
             return res.status(403).json({ error: 'Token inválido o no autorizado para esta acción' });
@@ -47,6 +59,14 @@ const verifyChangeToken = (req, res, next) => {
 // Login
 router.post('/login', async (req, res) => {
     try {
+        const secret = getJwtSecret();
+        if (!secret) {
+            return res.status(500).json({
+                error: 'Configuración del servidor incompleta (JWT_SECRET)',
+                code: 'SERVER_MISCONFIG'
+            });
+        }
+
         // El frontend enviará el DNI como 'username' y el teléfono/código como 'password'
         const { username, password } = req.body;
 
@@ -75,7 +95,7 @@ router.post('/login', async (req, res) => {
             // Generamos un token temporal con un propósito específico y corta duración
             const changeToken = jwt.sign(
                 { id: user._id, purpose: 'change-password' },
-                process.env.JWT_SECRET,
+                secret,
                 { expiresIn: '15m' } // El usuario tiene 15 mins para cambiar la clave
             );
             return res.json({
@@ -113,7 +133,7 @@ router.post('/login', async (req, res) => {
                 role: user.role || 'admin',
                 employee_id: resolvedEmployeeId
             },
-            process.env.JWT_SECRET,
+            secret,
             { expiresIn: '24h' }
         );
 

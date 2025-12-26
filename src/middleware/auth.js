@@ -1,6 +1,10 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
+function getJwtSecret() {
+    return process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || process.env.JWT_KEY;
+}
+
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
@@ -9,14 +13,26 @@ const authenticateToken = (req, res, next) => {
         return res.status(401).json({ error: 'Token de autenticación requerido' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-        if (err) {
-            // 401 => el cliente debe re-autenticarse (token inválido/expirado)
-            return res.status(401).json({ error: 'Token inválido o expirado' });
-        }
-        req.user = user;
-        next();
-    });
+    const secret = getJwtSecret();
+    if (!secret) {
+        return res.status(500).json({
+            error: 'Configuración del servidor incompleta (JWT_SECRET)',
+            code: 'SERVER_MISCONFIG'
+        });
+    }
+
+    try {
+        jwt.verify(token, secret, (err, user) => {
+            if (err) {
+                // 401 => el cliente debe re-autenticarse (token inválido/expirado)
+                return res.status(401).json({ error: 'Token inválido o expirado' });
+            }
+            req.user = user;
+            next();
+        });
+    } catch (e) {
+        return res.status(500).json({ error: 'Error al verificar el token' });
+    }
 };
 
 const isAdmin = (req, res, next) => {
