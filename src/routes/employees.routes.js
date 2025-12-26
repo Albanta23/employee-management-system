@@ -604,6 +604,18 @@ router.put('/:id', async (req, res) => {
             stack: error && error.stack ? String(error.stack).split('\n').slice(0, 8).join('\n') : undefined
         });
 
+        // Conflictos de unicidad (DNI duplicado, username duplicado, etc.)
+        if (error && error.code === 11000) {
+            const key = error.keyPattern ? Object.keys(error.keyPattern)[0] : null;
+            if (key === 'dni') {
+                return res.status(409).json({ error: 'Ya existe un trabajador con ese DNI', requestId: req.requestId });
+            }
+            if (key === 'username') {
+                return res.status(409).json({ error: 'Ya existe un usuario con ese nombre de usuario', requestId: req.requestId });
+            }
+            return res.status(409).json({ error: 'Conflicto: dato duplicado', requestId: req.requestId });
+        }
+
         if (error && (error.name === 'CastError' || error.name === 'ValidationError')) {
             return res.status(400).json({ error: error.message || 'Datos inválidos', requestId: req.requestId });
         }
