@@ -586,11 +586,34 @@ router.put('/:id', async (req, res) => {
             const userUpdate = { username, name: full_name, email };
             if (password) userUpdate.password = await bcrypt.hash(password, 10);
 
-            await User.findOneAndUpdate(
-                { employee_id: employee._id },
-                { $set: userUpdate, $setOnInsert: { role: 'employee', employee_id: employee._id } },
-                { upsert: true }
-            );
+            // Si el username ya existe pero está huérfano (sin employee_id), lo reclamamos para este empleado
+            // para evitar un 409 por unicidad cuando el admin está habilitando acceso desde el formulario.
+            const existingByUsername = await User.findOne({ username })
+                .select('_id employee_id')
+                .lean();
+
+            const currentUser = await User.findOne({ employee_id: employee._id })
+                .select('_id username')
+                .lean();
+
+            if (
+                existingByUsername &&
+                (!existingByUsername.employee_id) &&
+                (!currentUser) &&
+                String(existingByUsername._id) !== String(employee._id)
+            ) {
+                await User.findByIdAndUpdate(
+                    existingByUsername._id,
+                    { $set: { ...userUpdate, role: 'employee', employee_id: employee._id } },
+                    { new: true }
+                );
+            } else {
+                await User.findOneAndUpdate(
+                    { employee_id: employee._id },
+                    { $set: userUpdate, $setOnInsert: { role: 'employee', employee_id: employee._id } },
+                    { upsert: true }
+                );
+            }
         }
 
         res.json({ message: 'Trabajador actualizado correctamente' });
@@ -610,18 +633,24 @@ router.put('/:id', async (req, res) => {
                 ? Object.keys(error.keyPattern)[0]
                 : (error.keyValue ? Object.keys(error.keyValue)[0] : null);
 
+            const duplicateValue = (key && error.keyValue && Object.prototype.hasOwnProperty.call(error.keyValue, key))
+                ? error.keyValue[key]
+                : undefined;
+
             if (key === 'dni') {
                 return res.status(409).json({
-                    error: 'Ya existe un trabajador con ese DNI',
+                    error: duplicateValue ? `Ya existe un trabajador con ese DNI (${duplicateValue})` : 'Ya existe un trabajador con ese DNI',
                     field: 'dni',
+                    value: duplicateValue,
                     requestId: req.requestId
                 });
             }
 
             if (key === 'username') {
                 return res.status(409).json({
-                    error: 'Ya existe un usuario con ese nombre de usuario',
+                    error: duplicateValue ? `Ya existe un usuario con ese nombre de usuario (${duplicateValue})` : 'Ya existe un usuario con ese nombre de usuario',
                     field: 'username',
+                    value: duplicateValue,
                     requestId: req.requestId
                 });
             }
@@ -629,6 +658,7 @@ router.put('/:id', async (req, res) => {
             return res.status(409).json({
                 error: 'Conflicto: dato duplicado',
                 field: key || undefined,
+                value: duplicateValue,
                 requestId: req.requestId
             });
         }

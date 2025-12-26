@@ -212,10 +212,42 @@
         if (employeeId) employeeId = employeeId.trim();
         const isEdit = !!employeeId;
 
+        function normalizeDniForUsername(value) {
+            return String(value || '').trim().toUpperCase();
+        }
+
+        function maybeAutofillUsernameFromDni() {
+            const enable = document.getElementById('enableAccess').checked;
+            if (!enable) return;
+
+            const dni = normalizeDniForUsername(document.getElementById('dni').value);
+            if (!dni) return;
+
+            const usernameInput = document.getElementById('username');
+            const current = String(usernameInput.value || '').trim();
+
+            // Si ya hay username (en edición o manual), no lo pisamos.
+            if (current) return;
+
+            // Regla: username por defecto = DNI completo (incluida letra inicial X/Y/Z si aplica)
+            usernameInput.value = dni;
+        }
+
         if (isEdit) {
             document.getElementById('formTitle').textContent = 'Editar Empleado';
             loadEmployee();
         }
+
+        // Si el admin marca habilitar acceso y aún no puso username, autocompletamos con el DNI.
+        document.getElementById('enableAccess').addEventListener('change', () => {
+            toggleAccessFields();
+            maybeAutofillUsernameFromDni();
+        });
+
+        // Si cambia el DNI y el username está vacío, lo proponemos automáticamente.
+        document.getElementById('dni').addEventListener('input', () => {
+            maybeAutofillUsernameFromDni();
+        });
 
         async function loadEmployee() {
             try {
@@ -252,6 +284,8 @@
                         document.getElementById('username').value = access.username;
                         toggleAccessFields();
                     }
+                    // Si no había acceso previo, pero se habilita manualmente, sugerimos DNI como username.
+                    maybeAutofillUsernameFromDni();
 
                     // Resumen de vacaciones (si el usuario tiene acceso a Vacaciones)
                     try {
