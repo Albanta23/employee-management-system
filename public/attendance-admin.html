@@ -215,9 +215,14 @@
                                 <tbody>
                                     ${group.logs.map(log => {
                     const hasCoords = log && log.latitude != null && log.longitude != null;
-                    const geoInfo = hasCoords ?
-                        `<a href="https://www.google.com/maps?q=${log.latitude},${log.longitude}" target="_blank" style="color: var(--primary-light); text-decoration: none;">📍 Ver Mapa</a>` :
-                        'Sin ubicación';
+                    const geoInfo = hasCoords
+                        ? `<a href="https://www.google.com/maps?q=${log.latitude},${log.longitude}" target="_blank" style="color: var(--primary-light); text-decoration: none;">📍 Ver Mapa</a>`
+                        : '';
+
+                    const storeName = (log && log.store_name) ? String(log.store_name).trim() : '';
+                    const locationCell = storeName
+                        ? `${storeName}${geoInfo ? `<div style=\"margin-top: 0.25rem;\">${geoInfo}</div>` : ''}`
+                        : (geoInfo || 'Sin ubicación');
 
                     return `
                                         <tr>
@@ -229,7 +234,7 @@
                                                     ${emojis[log.type]} ${labels[log.type]}
                                                 </span>
                                             </td>
-                                            <td>${geoInfo}</td>
+                                            <td>${locationCell}</td>
                                             <td style="color: var(--text-muted); font-size: 0.8em;">${log.device_info || '-'}</td>
                                         </tr>
                                         `;

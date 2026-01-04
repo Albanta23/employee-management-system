@@ -78,6 +78,17 @@ El servidor se iniciará en **http://localhost:3000**
 
 ## 📖 Uso
 
+### Portal de fichaje por tienda (tablet)
+
+- URL: `/store-clock.html`
+- Acceso: introduce **Nombre de la tienda** y **PIN de tienda**.
+- Fichaje: aparece la lista de empleados (Nombre + DNI). Al pulsar un empleado se pide su **código de acceso** (el mismo que usa en el Portal del Empleado).
+- El sistema registra automáticamente **ENTRADA** o **SALIDA** según el último fichaje del día.
+
+**Configurar PIN de tienda (admin):**
+
+- En “Ubicaciones” → editar/crear tienda → campo “PIN de tienda (portal tablet)”.
+
 ### Dashboard Principal
 
 - Visualiza estadísticas en tiempo real

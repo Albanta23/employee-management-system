@@ -1126,12 +1126,14 @@ async function handleStoreSubmit(e) {
     const storeId = document.getElementById('store-id').value;
     const name = document.getElementById('store-name').value.trim();
     const address = document.getElementById('store-address').value.trim();
+    const clockPin = (document.getElementById('store-clock-pin')?.value || '').trim();
     if (!name) {
         showError('El nombre de la tienda es requerido');
         return;
     }
 
     const payload = { name, address };
+    if (clockPin) payload.clock_pin = clockPin;
 
     try {
         showLoading(storeId ? 'Actualizando tienda...' : 'Creando tienda...');

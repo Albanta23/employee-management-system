@@ -1,10 +1,31 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcrypt');
 const Location = require('../models/Location');
 const Holiday = require('../models/Holiday');
 const Employee = require('../models/Employee');
 const { authenticateToken } = require('../middleware/auth');
 const { requireFeatureAccess, getStoreLocations, isAdmin } = require('../utils/accessScope');
+
+function stripClockPinFromLocation(location) {
+    if (!location) return location;
+
+    const out = { ...location };
+    if (Array.isArray(out.stores)) {
+        out.stores = out.stores.map((s) => {
+            if (!s) return s;
+            const store = { ...s };
+            delete store.clock_pin_hash;
+            return store;
+        });
+    }
+    return out;
+}
+
+function stripClockPinFromLocations(locations) {
+    if (!Array.isArray(locations)) return locations;
+    return locations.map(stripClockPinFromLocation);
+}
 
 function normalizeStoreName(value) {
     return String(value || '')
@@ -189,7 +210,7 @@ router.get('/', authenticateToken, async (req, res) => {
             }).filter(location => location.stores.length > 0);
         }
 
-        res.json(locations);
+        res.json(stripClockPinFromLocations(locations));
     } catch (error) {
         console.error('Error obteniendo ubicaciones:', error);
         res.status(500).json({ error: 'Error al obtener ubicaciones' });
@@ -219,7 +240,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
             );
         }
 
-        res.json(location);
+        res.json(stripClockPinFromLocation(location));
     } catch (error) {
         console.error('Error obteniendo ubicación:', error);
         res.status(500).json({ error: 'Error al obtener ubicación' });
@@ -363,7 +384,7 @@ router.post('/', authenticateToken, async (req, res) => {
         });
 
         await location.save();
-        res.status(201).json(location);
+        res.status(201).json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error creando ubicación:', error);
         res.status(500).json({ error: 'Error al crear ubicación' });
@@ -400,7 +421,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         if (active !== undefined) location.active = active;
 
         await location.save();
-        res.json(location);
+        res.json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error actualizando ubicación:', error);
         res.status(500).json({ error: 'Error al actualizar ubicación' });
@@ -453,7 +474,7 @@ router.post('/:id/stores', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Solo administradores pueden añadir tiendas' });
         }
 
-        const { name, address } = req.body;
+        const { name, address, clock_pin } = req.body;
 
         if (!name || !name.trim()) {
             return res.status(400).json({ error: 'El nombre de la tienda es requerido' });
@@ -471,14 +492,26 @@ router.post('/:id/stores', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Ya existe una tienda con ese nombre en esta ubicación' });
         }
 
+        let clockPinHash = '';
+        if (clock_pin !== undefined) {
+            const raw = String(clock_pin || '').trim();
+            if (raw && raw.length < 4) {
+                return res.status(400).json({ error: 'El PIN debe tener al menos 4 caracteres' });
+            }
+            if (raw) {
+                clockPinHash = await bcrypt.hash(raw, 10);
+            }
+        }
+
         location.stores.push({
             name: name.trim(),
+            clock_pin_hash: clockPinHash,
             address: address || '',
             localHolidays: []
         });
 
         await location.save();
-        res.status(201).json(location);
+        res.status(201).json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error añadiendo tienda:', error);
         res.status(500).json({ error: 'Error al añadir tienda' });
@@ -495,7 +528,7 @@ router.put('/:id/stores/:storeId', authenticateToken, async (req, res) => {
             return res.status(403).json({ error: 'Solo administradores pueden modificar tiendas' });
         }
 
-        const { name, address, active } = req.body;
+        const { name, address, active, clock_pin } = req.body;
         const location = await Location.findById(req.params.id);
 
         if (!location) {
@@ -522,8 +555,19 @@ router.put('/:id/stores/:storeId', authenticateToken, async (req, res) => {
         if (address !== undefined) store.address = address;
         if (active !== undefined) store.active = active;
 
+        // PIN del portal de fichaje (solo si se envía explícitamente)
+        if (clock_pin !== undefined) {
+            const raw = String(clock_pin || '').trim();
+            if (raw && raw.length < 4) {
+                return res.status(400).json({ error: 'El PIN debe tener al menos 4 caracteres' });
+            }
+            if (raw) {
+                store.clock_pin_hash = await bcrypt.hash(raw, 10);
+            }
+        }
+
         await location.save();
-        res.json(location);
+        res.json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error actualizando tienda:', error);
         res.status(500).json({ error: 'Error al actualizar tienda' });
@@ -770,7 +814,7 @@ router.post('/:id/stores/:storeId/holidays', authenticateToken, async (req, res)
         });
 
         await location.save();
-        res.status(201).json(location);
+        res.status(201).json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error añadiendo festivo local:', error);
         res.status(500).json({ error: 'Error al añadir festivo local' });
@@ -815,7 +859,7 @@ router.put('/:id/stores/:storeId/holidays/:holidayId', authenticateToken, async 
         if (isRecurring !== undefined) holiday.isRecurring = isRecurring;
 
         await location.save();
-        res.json(location);
+        res.json(stripClockPinFromLocation(location.toObject()));
     } catch (error) {
         console.error('Error actualizando festivo local:', error);
         res.status(500).json({ error: 'Error al actualizar festivo local' });

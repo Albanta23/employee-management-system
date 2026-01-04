@@ -11,6 +11,7 @@ const vacationsRoutes = require('./src/routes/vacations.routes');
 const absencesRoutes = require('./src/routes/absences.routes');
 const attendanceRoutes = require('./src/routes/attendance.routes');
 const holidaysRoutes = require('./src/routes/holidays.routes');
+const storeClockRoutes = require('./src/routes/store-clock.routes');
 const { getSettingsForAccess, getStoreLocations, getStoreEmployeeIds } = require('./src/utils/accessScope');
 
 const app = express();
@@ -90,6 +91,7 @@ app.use('/api/vacations', vacationsRoutes);
 app.use('/api/absences', absencesRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/holidays', holidaysRoutes);
+app.use('/api/store-clock', storeClockRoutes);
 app.use('/api/settings', require('./src/routes/settings.routes'));
 app.use('/api/locations', require('./src/routes/locations.routes'));
 app.use('/api/audit', require('./src/routes/audit.routes'));

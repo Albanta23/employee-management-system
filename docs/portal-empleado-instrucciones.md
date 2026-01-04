@@ -157,6 +157,4 @@ Puedes cerrar sesión desde:
 
 Esto borrará tu sesión del navegador/app.
 
-
-
 **By JCF2025DV**

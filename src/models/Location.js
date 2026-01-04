@@ -28,6 +28,13 @@ const LocationSchema = new mongoose.Schema({
             required: true,
             trim: true
         },
+
+        // PIN de acceso al portal de fichaje en tablet (se guarda hasheado)
+        // NOTA: nunca devolver este campo al cliente.
+        clock_pin_hash: {
+            type: String,
+            default: ''
+        },
         
         // Dirección de la tienda
         address: {

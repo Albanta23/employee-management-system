@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fichaje por Tienda</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: var(--spacing-lg);
+            background: var(--bg-dark);
+        }
+
+        .card {
+            width: 100%;
+            max-width: 920px;
+            background: var(--bg-card);
+            border-radius: var(--radius-xl);
+            padding: var(--spacing-xl);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+
+        .muted {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-md);
+        }
+
+        @media (max-width: 720px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .employees {
+            margin-top: var(--spacing-xl);
+        }
+
+        .employees-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--spacing-md);
+        }
+
+        @media (max-width: 720px) {
+            .employees-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .employee-btn {
+            width: 100%;
+            text-align: left;
+            padding: var(--spacing-lg);
+        }
+
+        .employee-name {
+            font-weight: 700;
+            display: block;
+        }
+
+        .employee-dni {
+            color: var(--text-muted);
+            display: block;
+            margin-top: 4px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--spacing-md);
+            margin-top: var(--spacing-lg);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <div id="alert-container"></div>
+
+        <div id="punch-modal" class="modal">
+            <div class="modal-content" style="max-width: 520px;">
+                <h2 style="margin-bottom: var(--spacing-md);">Fichaje registrado</h2>
+                <div class="muted" id="punch-employee" style="margin-bottom: var(--spacing-sm);"></div>
+                <div style="display:flex; gap: var(--spacing-md); align-items:center; flex-wrap: wrap;">
+                    <span id="punch-type" class="badge badge-info">-</span>
+                    <span id="punch-datetime" class="muted">-</span>
+                </div>
+                <div class="muted" style="margin-top: var(--spacing-md);">
+                    Volviendo al portal en unos segundos...
+                </div>
+            </div>
+        </div>
+
+        <div class="header">
+            <h1>Fichaje por Tienda</h1>
+            <div class="muted" id="store-label">No conectado</div>
+        </div>
+
+        <div id="login-section">
+            <div class="grid">
+                <div class="form-group">
+                    <label class="form-label" for="store-name">Nombre de la tienda</label>
+                    <input class="form-control" type="text" id="store-name" placeholder="Ej: SALAMANCA1" autocapitalize="characters" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="store-pin">PIN de tienda</label>
+                    <input class="form-control" type="password" id="store-pin" placeholder="PIN" autocomplete="current-password" inputmode="numeric" />
+                </div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" id="btn-login">Acceder</button>
+            </div>
+        </div>
+
+        <div id="employees-section" class="employees hidden">
+            <div class="muted" style="margin-bottom: var(--spacing-md);">
+                Pulsa tu nombre y luego introduce tu código.
+            </div>
+            <div id="employees-grid" class="employees-grid"></div>
+            <div class="actions">
+                <button class="btn btn-secondary" id="btn-logout">Salir</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/store-clock.js"></script>
+</body>
+
+</html>

@@ -4,6 +4,8 @@ const AttendanceSchema = new mongoose.Schema({
     employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
     type: { type: String, required: true, enum: ['in', 'out', 'break_start', 'break_end'] },
     timestamp: { type: Date, default: Date.now },
+    // Tienda/origen del fichaje (portal tienda/tablet). Vacío para fichajes del portal empleado.
+    store_name: { type: String, default: '' },
     latitude: { type: Number },
     longitude: { type: Number },
     device_info: { type: String },
@@ -13,5 +15,6 @@ const AttendanceSchema = new mongoose.Schema({
 
 AttendanceSchema.index({ employee_id: 1, timestamp: -1 });
 AttendanceSchema.index({ timestamp: -1 });
+AttendanceSchema.index({ store_name: 1, timestamp: -1 });
 
 module.exports = mongoose.model('Attendance', AttendanceSchema);

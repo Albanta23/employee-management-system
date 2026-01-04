@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
+const Location = require('../models/Location');
 const { authenticateToken } = require('../middleware/auth');
 require('dotenv').config();
 
@@ -13,6 +14,32 @@ function getJwtSecret() {
 
 function normalizeDni(value) {
     return String(value || '').trim().toUpperCase();
+}
+
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function findActiveStoreByName(storeNameRaw) {
+    const storeName = String(storeNameRaw || '').trim();
+    if (!storeName) return null;
+    const rx = new RegExp(`^${escapeRegExp(storeName)}$`, 'i');
+
+    const location = await withTimeout(
+        Location.findOne({ active: true, 'stores.name': rx }).maxTimeMS(5000),
+        5500,
+        'Location.findOne (store login)'
+    );
+
+    if (!location) return null;
+    const store = (location.stores || []).find(s => s && rx.test(String(s.name || '')));
+    if (!store) return null;
+    if (store.active === false) return null;
+
+    return {
+        storeName: String(store.name || '').trim(),
+        clockPinHash: String(store.clock_pin_hash || '').trim()
+    };
 }
 
 function withTimeout(promise, ms, label) {
@@ -80,8 +107,39 @@ router.post('/login', async (req, res) => {
             'User.findOne (login)'
         );
 
+        // Si NO existe usuario, intentamos login como TIENDA (portal tablet)
         if (!user) {
-            return res.status(401).json({ error: 'Credenciales inválidas' });
+            const store = await findActiveStoreByName(username);
+            if (!store || !store.clockPinHash) {
+                return res.status(401).json({ error: 'Credenciales inválidas' });
+            }
+
+            const ok = await bcrypt.compare(String(password), store.clockPinHash);
+            if (!ok) {
+                return res.status(401).json({ error: 'Credenciales inválidas' });
+            }
+
+            const token = jwt.sign(
+                {
+                    id: `store:${store.storeName}`,
+                    username: store.storeName,
+                    role: 'store_clock',
+                    storeName: store.storeName
+                },
+                secret,
+                { expiresIn: '24h' }
+            );
+
+            return res.json({
+                token,
+                user: {
+                    id: `store:${store.storeName}`,
+                    username: store.storeName,
+                    name: store.storeName,
+                    role: 'store_clock',
+                    storeName: store.storeName
+                }
+            });
         }
 
         const validPassword = await bcrypt.compare(password, user.password);
