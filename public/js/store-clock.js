@@ -206,9 +206,11 @@ async function loadEmployees() {
     });
 }
 
-async function punch(dni, code) {
+async function punch(dni, code, { showErrors = true } = {}) {
     const coords = await getDeviceLocation();
-    return fetchJSONDetailed(`${API_URL}/store-clock/punch`, {
+    return fetchJSONDetailed(
+        `${API_URL}/store-clock/punch`,
+        {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -217,7 +219,9 @@ async function punch(dni, code) {
             latitude: coords ? coords.latitude : undefined,
             longitude: coords ? coords.longitude : undefined
         })
-    });
+        },
+        { showErrors }
+    );
 }
 
 async function loginForCodeChange(username, password) {
@@ -240,8 +244,15 @@ async function changePasswordWithToken(newPassword, changeToken) {
 }
 
 function isMustChangeError(payload) {
-    const msg = payload && payload.error ? String(payload.error) : '';
+    const msg = payload && (payload.error || payload.text) ? String(payload.error || payload.text) : '';
     return /debe\s+cambiar|cambiar\s+su\s+c[oó]digo|cambiar\s+tu\s+c[oó]digo|cambiar\s+la\s+contrase/i.test(msg);
+}
+
+function getErrorMessage(payload, fallback = 'Error') {
+    if (!payload) return fallback;
+    if (payload.error) return String(payload.error);
+    if (payload.text) return String(payload.text);
+    return fallback;
 }
 
 async function handleMustChangeFlow(dni, currentCode) {
@@ -365,7 +376,7 @@ function renderEmployees(employees) {
 
             btn.disabled = true;
             try {
-                const attempt = await punch(empDni, code);
+                const attempt = await punch(empDni, code, { showErrors: false });
                 if (attempt && attempt.ok) {
                     showPunchConfirmation(attempt.data);
                     return;
@@ -376,12 +387,17 @@ function renderEmployees(employees) {
                     const updatedCode = await handleMustChangeFlow(empDni, String(code).trim());
                     if (!updatedCode) return;
 
-                    const retry = await punch(empDni, updatedCode);
+                    const retry = await punch(empDni, updatedCode, { showErrors: false });
                     if (retry && retry.ok) {
                         showPunchConfirmation(retry.data);
                         return;
                     }
+
+                    showAlert(getErrorMessage(retry ? retry.data : null, 'No se pudo fichar'), 'error');
+                    return;
                 }
+
+                showAlert(getErrorMessage(attempt ? attempt.data : null, 'No se pudo fichar'), 'error');
             } finally {
                 btn.disabled = false;
             }
