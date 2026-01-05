@@ -149,6 +149,40 @@ async function fetchJSON(url, options = {}) {
     return data;
 }
 
+async function fetchJSONDetailed(url, options = {}, { showErrors = true } = {}) {
+    let response;
+    try {
+        response = await fetch(url, options);
+    } catch (err) {
+        const msg = err && err.message ? err.message : 'Error de red';
+        if (showErrors) showAlert(`No se pudo conectar con el servidor. ${msg}`, 'error');
+        return { ok: false, status: 0, data: { error: msg } };
+    }
+
+    if (response.status === 204) return { ok: true, status: 204, data: true };
+
+    let data = null;
+    const contentType = response.headers.get('content-type') || '';
+    try {
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            const t = await response.text();
+            data = t ? { text: t } : null;
+        }
+    } catch (_) {
+        data = null;
+    }
+
+    if (!response.ok) {
+        const msg = (data && data.error) ? data.error : `Error ${response.status}`;
+        if (showErrors) showAlert(msg, 'error');
+        return { ok: false, status: response.status, data: data || { error: msg } };
+    }
+
+    return { ok: true, status: response.status, data };
+}
+
 function getAuthHeaders() {
     const token = getStoreToken() || getUnifiedToken();
     return {
@@ -174,7 +208,7 @@ async function loadEmployees() {
 
 async function punch(dni, code) {
     const coords = await getDeviceLocation();
-    return fetchJSON(`${API_URL}/store-clock/punch`, {
+    return fetchJSONDetailed(`${API_URL}/store-clock/punch`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -184,6 +218,69 @@ async function punch(dni, code) {
             longitude: coords ? coords.longitude : undefined
         })
     });
+}
+
+async function loginForCodeChange(username, password) {
+    return fetchJSONDetailed(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+}
+
+async function changePasswordWithToken(newPassword, changeToken) {
+    return fetchJSONDetailed(`${API_URL}/auth/change-password`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(changeToken ? { 'Authorization': `Bearer ${changeToken}` } : {})
+        },
+        body: JSON.stringify({ newPassword })
+    });
+}
+
+function isMustChangeError(payload) {
+    const msg = payload && payload.error ? String(payload.error) : '';
+    return /debe\s+cambiar|cambiar\s+su\s+c[oó]digo|cambiar\s+tu\s+c[oó]digo|cambiar\s+la\s+contrase/i.test(msg);
+}
+
+async function handleMustChangeFlow(dni, currentCode) {
+    // 1) Obtener changeToken como en la app (login normal)
+    const loginResp = await loginForCodeChange(dni, currentCode);
+    if (!loginResp.ok) return null;
+
+    const loginData = loginResp.data || {};
+    const changeToken = loginData.changeToken;
+    const forceChange = !!loginData.forceChange;
+    if (!forceChange || !changeToken) {
+        showAlert('No se pudo iniciar el cambio de código. Contacta con administración.', 'error');
+        return null;
+    }
+
+    // 2) Pedir nuevo código
+    const newCode1 = window.prompt('Debes cambiar tu código de acceso. Introduce el nuevo código:');
+    if (newCode1 === null) return null;
+    const newCode2 = window.prompt('Repite el nuevo código:');
+    if (newCode2 === null) return null;
+
+    const a = String(newCode1 || '').trim();
+    const b = String(newCode2 || '').trim();
+
+    if (!a || !b) {
+        showAlert('Código nuevo requerido', 'error');
+        return null;
+    }
+    if (a !== b) {
+        showAlert('Los códigos no coinciden', 'error');
+        return null;
+    }
+
+    // 3) Cambiar contraseña/código
+    const changeResp = await changePasswordWithToken(a, changeToken);
+    if (!changeResp.ok) return null;
+
+    showAlert('Código actualizado. Ya puedes fichar.', 'success');
+    return a;
 }
 
 function getDeviceLocation() {
@@ -268,10 +365,23 @@ function renderEmployees(employees) {
 
             btn.disabled = true;
             try {
-                const result = await punch(empDni, code);
-                if (!result) return;
+                const attempt = await punch(empDni, code);
+                if (attempt && attempt.ok) {
+                    showPunchConfirmation(attempt.data);
+                    return;
+                }
 
-                showPunchConfirmation(result);
+                // Si debe cambiar el código, reutilizamos el flujo existente (/auth/login + /auth/change-password)
+                if (attempt && attempt.status === 403 && isMustChangeError(attempt.data)) {
+                    const updatedCode = await handleMustChangeFlow(empDni, String(code).trim());
+                    if (!updatedCode) return;
+
+                    const retry = await punch(empDni, updatedCode);
+                    if (retry && retry.ok) {
+                        showPunchConfirmation(retry.data);
+                        return;
+                    }
+                }
             } finally {
                 btn.disabled = false;
             }
