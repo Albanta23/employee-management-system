@@ -149,7 +149,10 @@ router.post('/login', async (req, res) => {
         }
 
         // Si el usuario debe cambiar su contraseña
-        if (user.mustChangePassword) {
+        // Nota: en usuarios antiguos/importados, el campo puede no existir (undefined).
+        // Para mantener el comportamiento de "primer acceso", tratamos undefined/null como true.
+        const shouldForceChange = (user.mustChangePassword !== false);
+        if ((user.role === 'employee' || user.role === 'store_coordinator') && shouldForceChange) {
             // Generamos un token temporal con un propósito específico y corta duración
             const changeToken = jwt.sign(
                 { id: user._id, purpose: 'change-password' },

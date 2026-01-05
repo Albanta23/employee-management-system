@@ -240,7 +240,8 @@ router.post('/punch', authenticateStoreClock, async (req, res) => {
             return res.status(401).json({ error: 'Código inválido' });
         }
 
-        if (user.mustChangePassword) {
+        const shouldForceChange = (user.mustChangePassword !== false);
+        if (shouldForceChange) {
             return res.status(403).json({ error: 'El empleado debe cambiar su código de acceso antes de fichar' });
         }
 
