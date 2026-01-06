@@ -375,17 +375,58 @@ const reportsUtil = {
         const rows = [];
         const labels = { in: 'ENTRADA', out: 'SALIDA', break_start: 'PAUSA (INI)', break_end: 'PAUSA (FIN)' };
 
-        Object.keys(groupedData).forEach(key => {
+        // Ordenar grupos por fecha (descendente) y luego por empleado (alfabético)
+        const sortedKeys = Object.keys(groupedData).sort((a, b) => {
+            const groupA = groupedData[a];
+            const groupB = groupedData[b];
+            
+            const dateA = new Date(groupA.dateISO);
+            const dateB = new Date(groupB.dateISO);
+            
+            // Primero ordenar por fecha (descendente - más reciente primero)
+            if (dateB.getTime() !== dateA.getTime()) {
+                return dateB - dateA;
+            }
+            
+            // Si es la misma fecha, ordenar por nombre de empleado (alfabético)
+            return groupA.employee.localeCompare(groupB.employee);
+        });
+
+        sortedKeys.forEach(key => {
             const group = groupedData[key];
+            
+            // Verificar si este día tiene vacaciones
+            const dateISO = group.dateISO || (() => {
+                // Convertir fecha ES a ISO
+                const parts = group.date.split('/');
+                if (parts.length === 3) {
+                    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                }
+                return '';
+            })();
+            
+            const vacationKey = `${group.employee_id}_${dateISO}`;
+            const vacationInfo = window.vacationsMap && window.vacationsMap[vacationKey];
+            const hasVacation = vacationInfo && vacationInfo.hasVacation;
+            
             const workTimeMs = reportsUtil.calculateWorkTime(group.logs);
             const workHours = Math.floor(workTimeMs / (1000 * 60 * 60));
             const workMinutes = Math.floor((workTimeMs % (1000 * 60 * 60)) / (1000 * 60));
             const timeString = `${workHours}h ${workMinutes}m`;
+            
+            const headerText = hasVacation 
+                ? `${group.date} - ${group.employee} (DNI: ${group.dni || 'N/A'}) - VACACIONES (${vacationInfo.dateRange}) - Total: ${timeString}`
+                : `${group.date} - ${group.employee} (DNI: ${group.dni || 'N/A'}) - Total: ${timeString}`;
+            
             rows.push([
                 {
-                    content: `${group.date} - ${group.employee} (DNI: ${group.dni || 'N/A'}) - Total: ${timeString}`,
+                    content: headerText,
                     colSpan: 4,
-                    styles: { fillColor: [226, 232, 240], fontStyle: 'bold', textColor: [30, 41, 59] }
+                    styles: { 
+                        fillColor: hasVacation ? [254, 243, 199] : [226, 232, 240], 
+                        fontStyle: 'bold', 
+                        textColor: hasVacation ? [146, 64, 14] : [30, 41, 59] 
+                    }
                 }
             ]);
 

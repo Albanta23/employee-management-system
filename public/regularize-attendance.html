@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regularización de Fichajes - Sistema de Gestión</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .pin-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .pin-overlay.hidden {
+            display: none;
+        }
+
+        .pin-container {
+            background: var(--bg-card);
+            padding: 2.5rem;
+            border-radius: var(--radius-xl);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            max-width: 450px;
+            width: 90%;
+        }
+
+        .pin-input {
+            font-size: 2rem;
+            text-align: center;
+            letter-spacing: 1rem;
+            padding: 1rem;
+            margin: 1.5rem 0;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid var(--primary);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-weight: 700;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .pin-input:focus {
+            outline: none;
+            border-color: var(--primary-light);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .regularize-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .regularize-modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            max-width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-regularize {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+        }
+
+        .btn-regularize:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+
+        #main-content {
+            display: none;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        #main-content.active {
+            display: flex;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        .pin-alert {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: var(--radius-md);
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .pin-alert.show {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- PIN Overlay -->
+    <div id="pin-overlay" class="pin-overlay">
+        <div class="pin-container">
+            <h2 style="margin-bottom: 0.5rem; color: var(--primary-light);">🔒 Área Restringida</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Regularización de Fichajes</p>
+            <input type="password" id="pin-input" class="pin-input" maxlength="4" placeholder="PIN"
+                autocomplete="off" inputmode="numeric">
+            <div id="pin-alert" class="pin-alert">
+                ❌ PIN incorrecto. Inténtalo de nuevo.
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 1rem;">
+                Introduzca el PIN de administrador o coordinador
+            </p>
+            <button onclick="window.location.href='dashboard.html'" class="btn btn-secondary"
+                style="width: 100%; margin-top: 1rem;">
+                ← Volver al Dashboard
+            </button>
+        </div>
+    </div>
+
+    <!-- Contenido Principal (oculto hasta validar PIN) -->
+    <div id="main-content">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo"><span>⚖️</span><span>Regularización</span></div>
+            </div>
+            <ul class="sidebar-menu">
+                <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+                <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
+                <li class="menu-item"><a href="regularize-attendance.html" class="menu-link active"><span>⚖️</span>
+                        Regularización</a></li>
+            </ul>
+            <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+                <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="card fade-in" style="margin-bottom: var(--spacing-xl);">
+                <div
+                    style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);">
+                    <div>
+                        <h1 style="margin: 0;">⚖️ Regularización de Fichajes</h1>
+                        <p style="color: var(--text-muted); margin: 0.5rem 0 0 0;">Ajuste automático de horarios según
+                            configuración del perfil</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="alert-container"></div>
+
+            <div class="card" style="margin-bottom: var(--spacing-lg);">
+                <div class="grid grid-cols-4">
+                    <div class="form-group">
+                        <label class="form-label">Fecha Inicio</label>
+                        <input type="date" id="startDate" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Fecha Fin</label>
+                        <input type="date" id="endDate" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Empleado</label>
+                        <select id="employeeSelect" class="form-select">
+                            <option value="">Todos los empleados</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: flex-end;">
+                        <button onclick="loadAttendance()" class="btn btn-primary" style="width: 100%;">🔍
+                            Filtrar</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 1rem; margin-top: 1rem; align-items: center;">
+                    <button onclick="openBulkRegularizeModal()" class="btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);" id="bulkRegularizeBtn" disabled>
+                        ⚖️ Regularizar Seleccionados (<span id="selectedCount">0</span>)
+                    </button>
+                    <label style="color: var(--text-muted); font-size: 0.9rem;">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()" style="margin-right: 0.5rem;">
+                        Seleccionar todos los resultados
+                    </label>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="table-container">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px;"><input type="checkbox" id="selectAllHeader" onchange="toggleSelectAll()" style="cursor: pointer;"></th>
+                                <th>Fecha</th>
+                                <th>Empleado</th>
+                                <th>DNI</th>
+                                <th>Registros</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attendanceTable">
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 2rem;">Use los filtros para buscar
+                                    registros</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal de confirmación para regularizar -->
+    <div id="regularize-modal" class="regularize-modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2 style="margin: 0; font-size: 1.25rem;">⚖️ Regularizar Fichajes</h2>
+                <button onclick="closeRegularizeModal()" class="btn-icon">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 1.5rem;">
+                <div
+                    style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <p style="margin: 0; color: #fbbf24;">
+                        ⚠️ Esta acción ajustará los timestamps de los fichajes según el horario configurado en el
+                        perfil del empleado.
+                    </p>
+                    <p style="margin: 0.5rem 0 0; color: var(--text-muted); font-size: 0.9rem;">
+                        La geolocalización y otros datos se mantendrán intactos. Solo se modificarán las horas.
+                    </p>
+                </div>
+
+                <div style="display: grid; gap: 1rem;">
+                    <div>
+                        <strong>Empleado:</strong> <span id="regularize-employee"></span>
+                    </div>
+                    <div>
+                        <strong>Fecha:</strong> <span id="regularize-date"></span>
+                    </div>
+                    <div>
+                        <strong>Horario configurado:</strong>
+                        <div id="regularize-schedule"
+                            style="margin-top: 0.5rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 8px; font-family: monospace; font-size: 0.9rem;">
+                            Cargando...
+                        </div>
+                    </div>
+                    
+                    <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+                        <div style="margin-bottom: 0.75rem;">
+                            <strong>⚙️ Ajuste de Horas</strong>
+                            <p style="margin: 0.5rem 0 0; color: var(--text-muted); font-size: 0.85rem;">
+                                Especifica a cuántas horas ajustar este día. Se aplicará una variación aleatoria de ±7-8 minutos.
+                            </p>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label class="form-label">Hora de Entrada</label>
+                                <input type="time" id="custom-start-time" class="form-control" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Hora de Salida</label>
+                                <input type="time" id="custom-end-time" class="form-control" />
+                            </div>
+                        </div>
+                        
+                        <div id="break-times-container" style="display: none; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.75rem;" class="form-group">
+                            <div class="form-group">
+                                <label class="form-label">Inicio Descanso</label>
+                                <input type="time" id="custom-break-start" class="form-control" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Fin Descanso</label>
+                                <input type="time" id="custom-break-end" class="form-control" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button onclick="closeRegularizeModal()" class="btn btn-secondary">
+                        Cancelar
+                    </button>
+                    <button onclick="confirmRegularize()" class="btn btn-primary">
+                        ✓ Confirmar Regularización
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de regularización masiva -->
+    <div id="bulk-regularize-modal" class="regularize-modal">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2 style="margin: 0; font-size: 1.25rem;">⚖️ Regularización Masiva</h2>
+                <button onclick="closeBulkRegularizeModal()" class="btn-icon">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 1.5rem;">
+                <div
+                    style="background: rgba(245, 158, 11, 0.1); border-left: 4px solid #f59e0b; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <p style="margin: 0; color: #fbbf24;">
+                        ⚠️ Esta acción regularizará <strong><span id="bulk-days-count">0</span> días</strong> del empleado seleccionado.
+                    </p>
+                    <p style="margin: 0.5rem 0 0; color: var(--text-muted); font-size: 0.9rem;">
+                        Todos los días seleccionados se ajustarán a las mismas horas con variaciones aleatorias de ±7-8 minutos.
+                    </p>
+                </div>
+
+                <div style="display: grid; gap: 1rem;">
+                    <div>
+                        <strong>Empleado:</strong> <span id="bulk-employee-name"></span>
+                    </div>
+                    <div>
+                        <strong>Período:</strong> <span id="bulk-date-range"></span>
+                    </div>
+                    <div>
+                        <strong>Días a regularizar:</strong>
+                        <div id="bulk-dates-list" style="margin-top: 0.5rem; padding: 0.75rem; background: rgba(0,0,0,0.2); border-radius: 8px; max-height: 150px; overflow-y: auto; font-size: 0.9rem;">
+                        </div>
+                    </div>
+                    
+                    <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+                        <div style="margin-bottom: 0.75rem;">
+                            <strong>⚙️ Configurar Horas para Todos los Días</strong>
+                            <p style="margin: 0.5rem 0 0; color: var(--text-muted); font-size: 0.85rem;">
+                                Estas horas se aplicarán a todos los días seleccionados con variación aleatoria automática.
+                            </p>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group">
+                                <label class="form-label">Hora de Entrada</label>
+                                <input type="time" id="bulk-start-time" class="form-control" value="09:00" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Hora de Salida</label>
+                                <input type="time" id="bulk-end-time" class="form-control" value="18:00" />
+                            </div>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.75rem;">
+                            <div class="form-group">
+                                <label class="form-label">Inicio Descanso (opcional)</label>
+                                <input type="time" id="bulk-break-start" class="form-control" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Fin Descanso (opcional)</label>
+                                <input type="time" id="bulk-break-end" class="form-control" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button onclick="closeBulkRegularizeModal()" class="btn btn-secondary">
+                        Cancelar
+                    </button>
+                    <button onclick="confirmBulkRegularize()" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                        ✓ Confirmar Regularización Masiva
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
+    <script>
+        // Verificar autenticación
+        if (!isAuthenticated()) window.location.href = 'index.html';
+
+        let ADMIN_PIN = '1234'; // Valor por defecto
+        let COORDINATOR_PIN = '5678'; // Valor por defecto
+
+        // Cargar PINs desde la configuración
+        async function loadPins() {
+            try {
+                const settings = await settingsAPI.get();
+                if (settings) {
+                    ADMIN_PIN = settings.regularization_admin_pin || '1234';
+                    COORDINATOR_PIN = settings.regularization_coordinator_pin || '5678';
+                }
+            } catch (error) {
+                console.error('Error cargando PINs:', error);
+                // Usar valores por defecto si hay error
+            }
+        }
+
+        // Validar PIN
+        const pinInput = document.getElementById('pin-input');
+        const pinAlert = document.getElementById('pin-alert');
+        const pinOverlay = document.getElementById('pin-overlay');
+        const mainContent = document.getElementById('main-content');
+
+        pinInput.addEventListener('input', (e) => {
+            const pin = e.target.value;
+            
+            // Ocultar alerta al escribir
+            pinAlert.classList.remove('show');
+            
+            // Validar cuando tenga 4 dígitos
+            if (pin.length === 4) {
+                if (pin === ADMIN_PIN || pin === COORDINATOR_PIN) {
+                    // PIN correcto
+                    pinOverlay.classList.add('hidden');
+                    mainContent.classList.add('active');
+                    
+                    // Inicializar después de mostrar
+                    setTimeout(() => {
+                        init();
+                    }, 150);
+                } else {
+                    // PIN incorrecto
+                    pinAlert.classList.add('show');
+                    
+                    // Limpiar después de 1 segundo
+                    setTimeout(() => {
+                        e.target.value = '';
+                        pinAlert.classList.remove('show');
+                    }, 1500);
+                }
+            }
+        });
+
+        // Foco automático en el input
+        window.addEventListener('load', () => {
+            pinInput.focus();
+        });
+
+        let currentLogs = [];
+
+        async function init() {
+            // Pre-cargar fechas (semana actual)
+            const now = new Date();
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).toISOString().split('T')[0];
+            const lastDay = now.toISOString().split('T')[0];
+            document.getElementById('startDate').value = firstDay;
+            document.getElementById('endDate').value = lastDay;
+
+            // Cargar empleados para el select
+            const data = await employeesAPI.getAll({ limit: 1000 });
+            if (data && data.employees) {
+                const select = document.getElementById('employeeSelect');
+                data.employees.forEach(e => {
+                    const opt = document.createElement('option');
+                    opt.value = e._id;
+                    opt.textContent = e.full_name;
+                    select.appendChild(opt);
+                });
+            }
+            loadAttendance();
+        }
+
+        async function loadAttendance() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const employeeId = document.getElementById('employeeSelect').value;
+
+            const params = {};
+            if (startDate) params.start_date = startDate;
+            if (endDate) params.end_date = endDate;
+            if (employeeId) params.employee_id = employeeId;
+
+            const logs = await attendanceAPI.getReport(params);
+            
+            // Calcular rango de fechas para vacaciones
+            let vacationStartDate = startDate;
+            let vacationEndDate = endDate;
+            
+            // Si no hay fechas de filtro pero hay logs, usar el rango de los logs
+            if ((!vacationStartDate || !vacationEndDate) && logs && logs.length > 0) {
+                const dates = logs.map(l => new Date(l.timestamp).toISOString().split('T')[0]);
+                vacationStartDate = dates.reduce((min, d) => d < min ? d : min, dates[0]);
+                vacationEndDate = dates.reduce((max, d) => d > max ? d : max, dates[0]);
+            }
+            
+            // Enriquecer con vacaciones
+            await enrichWithVacations(logs || [], vacationStartDate, vacationEndDate, employeeId);
+            
+            // Generar días de vacaciones sin fichajes
+            const enrichedLogs = await generateVacationDays(logs || [], vacationStartDate, vacationEndDate, employeeId);
+            
+            currentLogs = enrichedLogs;
+            renderTable(enrichedLogs);
+        }
+
+        async function enrichWithVacations(logs, startDate, endDate, employeeId) {
+            // Determinar qué empleados y rango de fechas consultar
+            let employeeIds = [];
+            
+            if (employeeId) {
+                // Si hay un empleado específico seleccionado
+                employeeIds = [employeeId];
+            } else {
+                // Obtener empleados únicos de los logs
+                const logsEmployees = [...new Set(logs.map(l => l.employee_id).filter(Boolean))];
+                if (logsEmployees.length > 0) {
+                    employeeIds = logsEmployees;
+                } else {
+                    // Si no hay logs y no hay empleado seleccionado, no hay nada que hacer
+                    window.vacationsMap = {};
+                    return;
+                }
+            }
+
+            try {
+                const allVacations = [];
+                for (const empId of employeeIds) {
+                    const vacations = await vacationsAPI.getAll({ employee_id: empId });
+                    if (vacations && vacations.length > 0) {
+                        const approved = vacations.filter(v => v.status === 'approved');
+                        allVacations.push(...approved.map(v => ({ ...v, employee_id: empId })));
+                    }
+                }
+
+                // Crear mapa de empleado + fecha -> información de vacaciones
+                window.vacationsMap = {};
+                allVacations.forEach(vac => {
+                    const start = new Date(vac.start_date);
+                    const end = new Date(vac.end_date);
+                    
+                    // Formatear fechas para mostrar
+                    const startFormatted = start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+                    const endFormatted = end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const dateRange = `${startFormatted} - ${endFormatted}`;
+                    
+                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                        const dateKey = d.toISOString().split('T')[0];
+                        const mapKey = `${vac.employee_id}_${dateKey}`;
+                        window.vacationsMap[mapKey] = {
+                            hasVacation: true,
+                            dateRange: dateRange,
+                            startDate: vac.start_date,
+                            endDate: vac.end_date
+                        };
+                    }
+                });
+                
+                console.log('Vacaciones cargadas:', Object.keys(window.vacationsMap).length, 'días');
+            } catch (error) {
+                console.error('Error cargando vacaciones:', error);
+                window.vacationsMap = {};
+            }
+        }
+
+        async function generateVacationDays(logs, startDate, endDate, employeeId) {
+            if (!window.vacationsMap || Object.keys(window.vacationsMap).length === 0) {
+                console.log('No hay vacaciones en el mapa');
+                return logs;
+            }
+
+            // Si no hay rango de fechas, no generar días sintéticos
+            if (!startDate || !endDate) {
+                console.log('No hay rango de fechas especificado');
+                return logs;
+            }
+
+            console.log('Generando días de vacaciones. Rango:', startDate, '-', endDate, 'Empleado:', employeeId);
+            console.log('Vacaciones en mapa:', Object.keys(window.vacationsMap).length);
+
+            // Obtener información de empleados
+            const employeeCache = {};
+            
+            // Si hay un empleado específico, obtener su info
+            if (employeeId) {
+                try {
+                    const response = await fetch(`/api/employees/${employeeId}`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    if (response.ok) {
+                        const employee = await response.json();
+                        employeeCache[employeeId] = employee;
+                        console.log('Empleado cargado:', employee.full_name);
+                    }
+                } catch (error) {
+                    console.error('Error obteniendo empleado:', error);
+                }
+            }
+
+            // Crear logs sintéticos para días de vacaciones sin fichajes
+            const syntheticLogs = [];
+            
+            for (const [mapKey, vacationInfo] of Object.entries(window.vacationsMap)) {
+                const [empId, dateISO] = mapKey.split('_');
+                
+                // Verificar si el día está en el rango solicitado
+                if (startDate && dateISO < startDate) continue;
+                if (endDate && dateISO > endDate) continue;
+                
+                // Si hay filtro de empleado, solo procesar ese empleado
+                if (employeeId && empId !== employeeId) continue;
+                
+                // Verificar si ya existe un fichaje para este día
+                const existingLog = logs.find(l => {
+                    const logDate = new Date(l.timestamp).toISOString().split('T')[0];
+                    return l.employee_id === empId && logDate === dateISO;
+                });
+                
+                if (!existingLog) {
+                    // Obtener información del empleado si no está en caché
+                    if (!employeeCache[empId]) {
+                        try {
+                            const response = await fetch(`/api/employees/${empId}`, {
+                                headers: {
+                                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                }
+                            });
+                            if (response.ok) {
+                                const employee = await response.json();
+                                employeeCache[empId] = employee;
+                            }
+                        } catch (error) {
+                            console.error('Error obteniendo empleado:', error);
+                        }
+                    }
+                    
+                    const employee = employeeCache[empId];
+                    if (employee) {
+                        // Crear un log sintético para el día de vacaciones
+                        syntheticLogs.push({
+                            timestamp: new Date(dateISO + 'T12:00:00').toISOString(),
+                            employee_id: empId,
+                            full_name: employee.full_name,
+                            dni: employee.dni,
+                            type: 'vacation', // Marcador especial
+                            isVacationDay: true
+                        });
+                    }
+                }
+            }
+            
+            console.log('Logs sintéticos generados:', syntheticLogs.length);
+            
+            // Combinar logs reales con logs sintéticos de vacaciones
+            return [...logs, ...syntheticLogs];
+        }
+
+        function renderTable(logs) {
+            const tbody = document.getElementById('attendanceTable');
+            if (!logs || logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem;">No se encontraron registros</td></tr>';
+                updateSelectedCount();
+                return;
+            }
+
+            // Agrupar por Fecha + Empleado
+            const grouped = {};
+            logs.forEach(log => {
+                const dateKey = new Date(log.timestamp).toLocaleDateString('es-ES');
+                const dateISO = new Date(log.timestamp).toISOString().split('T')[0];
+                const key = `${dateKey}_${log.employee_id}`;
+
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        date: dateKey,
+                        dateISO: dateISO,
+                        employee: log.full_name,
+                        employeeId: log.employee_id,
+                        dni: log.dni,
+                        logs: []
+                    };
+                }
+                grouped[key].logs.push(log);
+            });
+
+            const sortedKeys = Object.keys(grouped).sort((a, b) => {
+                const dateA = new Date(grouped[a].dateISO);
+                const dateB = new Date(grouped[b].dateISO);
+                
+                // Primero ordenar por fecha (descendente - más reciente primero)
+                if (dateB.getTime() !== dateA.getTime()) {
+                    return dateB - dateA;
+                }
+                
+                // Si es la misma fecha, ordenar por nombre de empleado (alfabético)
+                return grouped[a].employee.localeCompare(grouped[b].employee);
+            });
+
+            let html = '';
+            sortedKeys.forEach((key) => {
+                const group = grouped[key];
+                group.logs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                // Verificar si tiene vacaciones
+                const vacationKey = `${group.employeeId}_${group.dateISO}`;
+                const vacationInfo = window.vacationsMap && window.vacationsMap[vacationKey];
+                const hasVacation = vacationInfo && vacationInfo.hasVacation;
+
+                const emojis = { in: '🟢', out: '🔴', break_start: '🟠', break_end: '🔵' };
+                
+                // Determinar si es un día de vacaciones sin fichajes
+                const isVacationOnly = group.logs.length === 1 && group.logs[0].isVacationDay;
+                
+                // Si es un día de vacaciones sin fichajes
+                let logsSummary;
+                if (isVacationOnly) {
+                    logsSummary = '<span style="color: var(--text-muted); font-style: italic;">Sin fichajes (Vacaciones)</span>';
+                } else {
+                    logsSummary = group.logs
+                        .filter(l => !l.isVacationDay) // Excluir el marcador sintético
+                        .map(l => `${emojis[l.type]} ${new Date(l.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`)
+                        .join(' ');
+                }
+
+                // Crear badge de vacaciones con rango de fechas
+                let vacationBadge = '';
+                if (hasVacation) {
+                    vacationBadge = ` <span class="badge badge-warning" title="Vacaciones: ${vacationInfo.dateRange}" style="cursor: help;">VACACIONES (${vacationInfo.dateRange})</span>`;
+                }
+
+                // Deshabilitar checkbox y botón si es un día de vacaciones sin fichajes
+                const checkboxHtml = isVacationOnly 
+                    ? '<td style="text-align: center;">-</td>' 
+                    : `<td><input type="checkbox" class="day-checkbox" data-employee-id="${group.employeeId}" data-date="${group.dateISO}" data-employee-name="${group.employee.replace(/"/g, '&quot;')}" onchange="updateSelectedCount()" style="cursor: pointer;"></td>`;
+                
+                const actionHtml = isVacationOnly
+                    ? '<span style="color: var(--text-muted); font-size: 0.85rem;">No regularizable</span>'
+                    : `<button class="btn-regularize" onclick="openRegularizeModal('${group.employeeId}', '${group.dateISO}', '${group.employee.replace(/'/g, "\\'")}')">⚖️ Regularizar</button>`;
+
+                html += `
+                <tr style="${isVacationOnly ? 'opacity: 0.6;' : ''}">
+                    ${checkboxHtml}
+                    <td>${group.date}${vacationBadge}</td>
+                    <td><strong>${group.employee}</strong></td>
+                    <td>${group.dni || '-'}</td>
+                    <td style="font-family: monospace; font-size: 0.9rem;">${logsSummary}</td>
+                    <td>
+                        ${actionHtml}
+                    </td>
+                </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+            updateSelectedCount();
+        }
+
+        // Variables para el modal de regularización
+        let regularizeData = { employeeId: null, date: null, employeeName: '' };
+
+        async function openRegularizeModal(employeeId, dateISO, employeeName) {
+            regularizeData = { employeeId, date: dateISO, employeeName };
+
+            document.getElementById('regularize-employee').textContent = employeeName;
+            document.getElementById('regularize-date').textContent = new Date(dateISO + 'T12:00:00').toLocaleDateString('es-ES', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            // Obtener el horario configurado del empleado
+            try {
+                const response = await fetch(`/api/employees/${employeeId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+
+                if (!response.ok) throw new Error('Error al obtener empleado');
+
+                const employee = await response.json();
+                const schedule = employee.work_schedule;
+
+                // Valores por defecto si no hay horario configurado
+                let daySchedule = {
+                    start_time: '09:00',
+                    end_time: '18:00',
+                    break_start: '',
+                    break_end: ''
+                };
+
+                // Si el empleado tiene horario configurado, usarlo
+                if (schedule && schedule.enabled && schedule.start_time && schedule.end_time) {
+                    // Calcular el horario específico para ese día
+                    const targetDate = new Date(dateISO + 'T12:00:00');
+                    const dow = targetDate.getDay();
+
+                    daySchedule = {
+                        start_time: schedule.start_time || '09:00',
+                        end_time: schedule.end_time || '18:00',
+                        break_start: schedule.break_start || '',
+                        break_end: schedule.break_end || ''
+                    };
+
+                    // Verificar date_overrides
+                    if (schedule.date_overrides && Array.isArray(schedule.date_overrides)) {
+                        const dateOverride = schedule.date_overrides.find(o => o && o.date === dateISO);
+                        if (dateOverride) {
+                            daySchedule = {
+                                start_time: dateOverride.start_time || daySchedule.start_time,
+                                end_time: dateOverride.end_time || daySchedule.end_time,
+                                break_start: dateOverride.break_start !== undefined ? dateOverride.break_start : daySchedule.break_start,
+                                break_end: dateOverride.break_end !== undefined ? dateOverride.break_end : daySchedule.break_end
+                            };
+                        }
+                    }
+
+                    // Verificar day_overrides
+                    if (!daySchedule.start_time || daySchedule.start_time === schedule.start_time) {
+                        const dowOverrides = schedule.day_overrides || {};
+                        const dowOverride = dowOverrides[String(dow)] || dowOverrides[dow];
+                        if (dowOverride) {
+                            daySchedule = {
+                                start_time: dowOverride.start_time || daySchedule.start_time,
+                                end_time: dowOverride.end_time || daySchedule.end_time,
+                                break_start: dowOverride.break_start !== undefined ? dowOverride.break_start : daySchedule.break_start,
+                                break_end: dowOverride.break_end !== undefined ? dowOverride.break_end : daySchedule.break_end
+                            };
+                        }
+                    }
+                }
+
+                let scheduleHTML = `
+                    <div>📥 <strong>Entrada:</strong> ${daySchedule.start_time}</div>
+                    <div>📤 <strong>Salida:</strong> ${daySchedule.end_time}</div>
+                `;
+
+                if (!schedule || !schedule.enabled) {
+                    scheduleHTML = `
+                        <div style="color: var(--text-muted); font-style: italic;">
+                            ⚠️ Este empleado no tiene horario configurado
+                        </div>
+                        <div style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">
+                            Los campos se pre-cargan con valores por defecto (09:00 - 18:00). Ajústalos según necesites.
+                        </div>
+                    `;
+                }
+
+                // Solo añadir info de descanso si el empleado tiene horario configurado y hay descansos
+                if (schedule && schedule.enabled && daySchedule.break_start && daySchedule.break_end) {
+                    scheduleHTML += `<div>☕ <strong>Descanso:</strong> ${daySchedule.break_start} - ${daySchedule.break_end}</div>`;
+                }
+
+                document.getElementById('regularize-schedule').innerHTML = scheduleHTML;
+
+                // Pre-cargar los inputs con los valores del horario (configurado o por defecto)
+                document.getElementById('custom-start-time').value = daySchedule.start_time;
+                document.getElementById('custom-end-time').value = daySchedule.end_time;
+                
+                // Siempre mostrar campos de descanso (ahora son opcionales)
+                const breakContainer = document.getElementById('break-times-container');
+                breakContainer.style.display = 'grid';
+                
+                if (daySchedule.break_start && daySchedule.break_end) {
+                    document.getElementById('custom-break-start').value = daySchedule.break_start;
+                    document.getElementById('custom-break-end').value = daySchedule.break_end;
+                } else {
+                    document.getElementById('custom-break-start').value = '';
+                    document.getElementById('custom-break-end').value = '';
+                }
+
+                document.getElementById('regularize-modal').classList.add('active');
+            } catch (error) {
+                console.error('Error al cargar horario:', error);
+                showAlert('Error al cargar el horario del empleado', 'error');
+            }
+        }
+
+        function closeRegularizeModal() {
+            document.getElementById('regularize-modal').classList.remove('active');
+            regularizeData = { employeeId: null, date: null, employeeName: '' };
+        }
+
+        async function confirmRegularize() {
+            const { employeeId, date, employeeName } = regularizeData;
+
+            if (!employeeId || !date) {
+                showAlert('Datos incompletos', 'error');
+                return;
+            }
+
+            // Obtener las horas personalizadas
+            const customStartTime = document.getElementById('custom-start-time').value;
+            const customEndTime = document.getElementById('custom-end-time').value;
+            const customBreakStart = document.getElementById('custom-break-start').value;
+            const customBreakEnd = document.getElementById('custom-break-end').value;
+
+            if (!customStartTime || !customEndTime) {
+                showAlert('Debe especificar hora de entrada y salida', 'error');
+                return;
+            }
+
+            // Preparar el body con las horas objetivo
+            const body = {
+                target_hours: {
+                    start_time: customStartTime,
+                    end_time: customEndTime
+                }
+            };
+
+            // Añadir descansos solo si ambos están completos
+            if (customBreakStart && customBreakEnd) {
+                body.target_hours.break_start = customBreakStart;
+                body.target_hours.break_end = customBreakEnd;
+            }
+
+            try {
+                const response = await fetch(`/api/attendance/regularize/${employeeId}/${date}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Error al regularizar');
+                }
+
+                showAlert(`✅ Fichajes de ${employeeName} regularizados correctamente (${result.updates.length} ajustes)`, 'success');
+                closeRegularizeModal();
+
+                // Recargar la tabla
+                await loadAttendance();
+
+            } catch (error) {
+                console.error('Error al regularizar:', error);
+                showAlert(error.message || 'Error al regularizar fichajes', 'error');
+            }
+        }
+
+        // Funciones para regularización masiva
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox') || document.getElementById('selectAllHeader');
+            const checkboxes = document.querySelectorAll('.day-checkbox');
+            const isChecked = selectAllCheckbox.checked;
+            
+            checkboxes.forEach(cb => {
+                cb.checked = isChecked;
+            });
+            
+            // Sincronizar ambos checkboxes
+            const headerCheckbox = document.getElementById('selectAllHeader');
+            const filterCheckbox = document.getElementById('selectAllCheckbox');
+            if (headerCheckbox) headerCheckbox.checked = isChecked;
+            if (filterCheckbox) filterCheckbox.checked = isChecked;
+            
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const checkboxes = document.querySelectorAll('.day-checkbox:checked');
+            const count = checkboxes.length;
+            const countSpan = document.getElementById('selectedCount');
+            const bulkBtn = document.getElementById('bulkRegularizeBtn');
+            
+            if (countSpan) countSpan.textContent = count;
+            if (bulkBtn) bulkBtn.disabled = count === 0;
+        }
+
+        function openBulkRegularizeModal() {
+            const checkboxes = document.querySelectorAll('.day-checkbox:checked');
+            if (checkboxes.length === 0) {
+                showAlert('Debe seleccionar al menos un día', 'error');
+                return;
+            }
+
+            // Verificar que todos sean del mismo empleado
+            const employeeIds = new Set();
+            const selectedData = [];
+            
+            checkboxes.forEach(cb => {
+                const employeeId = cb.dataset.employeeId;
+                const date = cb.dataset.date;
+                const employeeName = cb.dataset.employeeName;
+                
+                employeeIds.add(employeeId);
+                selectedData.push({ employeeId, date, employeeName });
+            });
+
+            if (employeeIds.size > 1) {
+                showAlert('Solo puede regularizar días de un mismo empleado a la vez', 'error');
+                return;
+            }
+
+            // Ordenar fechas
+            selectedData.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Mostrar información en el modal
+            const firstEmployee = selectedData[0].employeeName;
+            const firstDate = new Date(selectedData[0].date);
+            const lastDate = new Date(selectedData[selectedData.length - 1].date);
+            
+            document.getElementById('bulk-employee-name').textContent = firstEmployee;
+            document.getElementById('bulk-days-count').textContent = selectedData.length;
+            
+            const dateRangeText = selectedData.length === 1 
+                ? firstDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })
+                : `${firstDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} - ${lastDate.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+            
+            document.getElementById('bulk-date-range').textContent = dateRangeText;
+            
+            // Mostrar lista de fechas
+            const datesList = selectedData.map(d => {
+                const date = new Date(d.date);
+                return `<div>📅 ${date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>`;
+            }).join('');
+            
+            document.getElementById('bulk-dates-list').innerHTML = datesList;
+            
+            // Guardar datos para confirmar
+            window.bulkRegularizeData = selectedData;
+            
+            document.getElementById('bulk-regularize-modal').classList.add('active');
+        }
+
+        function closeBulkRegularizeModal() {
+            document.getElementById('bulk-regularize-modal').classList.remove('active');
+            window.bulkRegularizeData = null;
+        }
+
+        async function confirmBulkRegularize() {
+            if (!window.bulkRegularizeData || window.bulkRegularizeData.length === 0) {
+                showAlert('No hay datos para regularizar', 'error');
+                return;
+            }
+
+            const startTime = document.getElementById('bulk-start-time').value;
+            const endTime = document.getElementById('bulk-end-time').value;
+            const breakStart = document.getElementById('bulk-break-start').value;
+            const breakEnd = document.getElementById('bulk-break-end').value;
+
+            if (!startTime || !endTime) {
+                showAlert('Debe especificar hora de entrada y salida', 'error');
+                return;
+            }
+
+            const employeeId = window.bulkRegularizeData[0].employeeId;
+            const dates = window.bulkRegularizeData.map(d => d.date);
+
+            const body = {
+                employeeId,
+                dates,
+                target_hours: {
+                    start_time: startTime,
+                    end_time: endTime
+                }
+            };
+
+            if (breakStart && breakEnd) {
+                body.target_hours.break_start = breakStart;
+                body.target_hours.break_end = breakEnd;
+            }
+
+            try {
+                const response = await fetch('/api/attendance/regularize-bulk', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Error al regularizar');
+                }
+
+                showAlert(`✅ ${result.message}`, 'success');
+                closeBulkRegularizeModal();
+
+                // Deseleccionar todos los checkboxes
+                document.querySelectorAll('.day-checkbox').forEach(cb => cb.checked = false);
+                if (document.getElementById('selectAllCheckbox')) document.getElementById('selectAllCheckbox').checked = false;
+                if (document.getElementById('selectAllHeader')) document.getElementById('selectAllHeader').checked = false;
+                updateSelectedCount();
+
+                // Recargar la tabla
+                await loadAttendance();
+
+            } catch (error) {
+                console.error('Error en regularización masiva:', error);
+                showAlert(error.message || 'Error en regularización masiva', 'error');
+            }
+        }
+
+        // Inicializar
+        (async function init() {
+            await loadPins();
+            // Auto-focus en el input PIN
+            pinInput.focus();
+        })();
+    </script>
+</body>
+
+</html>

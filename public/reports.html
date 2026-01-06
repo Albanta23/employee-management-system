@@ -51,6 +51,7 @@
                 <div class="form-group">
                     <label class="form-label">Tipo de reporte</label>
                     <select id="reportType" class="form-select" onchange="onReportTypeChange()">
+                        <option value="attendance">Fichajes</option>
                         <option value="vacation">Consumo de vacaciones (por empleado)</option>
                         <option value="absences">Absentismo por causa</option>
                         <option value="monthly">Resumen mensual por tienda</option>
@@ -61,6 +62,18 @@
                     <label class="form-label">Ubicación</label>
                     <select id="locationFilter" class="form-select">
                         <option value="">Todas</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="periodGroup">
+                    <label class="form-label">Período</label>
+                    <select id="periodFilter" class="form-select" onchange="onPeriodChange()">
+                        <option value="custom">Personalizado</option>
+                        <option value="week">Esta semana</option>
+                        <option value="last-week">Semana pasada</option>
+                        <option value="month">Este mes</option>
+                        <option value="last-month">Mes pasado</option>
+                        <option value="year">Este año</option>
                     </select>
                 </div>
 
@@ -122,6 +135,7 @@
         }
 
         let currentExport = { title: '', columns: [], rows: [], fileName: 'Reporte' };
+        let currentAttendanceLogs = [];
 
         function toISODate(d) {
             const dt = new Date(d);
@@ -145,16 +159,77 @@
             const monthGroup = document.getElementById('monthGroup');
             const startGroup = document.getElementById('dateStartGroup');
             const endGroup = document.getElementById('dateEndGroup');
+            const periodGroup = document.getElementById('periodGroup');
 
             if (type === 'monthly') {
                 monthGroup.style.display = '';
                 startGroup.style.display = 'none';
                 endGroup.style.display = 'none';
+                periodGroup.style.display = 'none';
+            } else if (type === 'attendance') {
+                monthGroup.style.display = 'none';
+                startGroup.style.display = '';
+                endGroup.style.display = '';
+                periodGroup.style.display = '';
             } else {
                 monthGroup.style.display = 'none';
                 startGroup.style.display = '';
                 endGroup.style.display = '';
+                periodGroup.style.display = 'none';
             }
+        }
+
+        function onPeriodChange() {
+            const period = document.getElementById('periodFilter').value;
+            const now = new Date();
+            let start, end;
+
+            switch (period) {
+                case 'week':
+                    // Esta semana (lunes a domingo)
+                    const day = now.getDay();
+                    const diff = day === 0 ? -6 : 1 - day; // Ajustar al lunes
+                    start = new Date(now);
+                    start.setDate(now.getDate() + diff);
+                    end = new Date(start);
+                    end.setDate(start.getDate() + 6);
+                    break;
+
+                case 'last-week':
+                    // Semana pasada
+                    const lastWeekDay = now.getDay();
+                    const lastWeekDiff = lastWeekDay === 0 ? -6 : 1 - lastWeekDay;
+                    start = new Date(now);
+                    start.setDate(now.getDate() + lastWeekDiff - 7);
+                    end = new Date(start);
+                    end.setDate(start.getDate() + 6);
+                    break;
+
+                case 'month':
+                    // Este mes
+                    start = new Date(now.getFullYear(), now.getMonth(), 1);
+                    end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    break;
+
+                case 'last-month':
+                    // Mes pasado
+                    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    end = new Date(now.getFullYear(), now.getMonth(), 0);
+                    break;
+
+                case 'year':
+                    // Este año
+                    start = new Date(now.getFullYear(), 0, 1);
+                    end = new Date(now.getFullYear(), 11, 31);
+                    break;
+
+                default:
+                    // Personalizado - no hacer nada
+                    return;
+            }
+
+            document.getElementById('startDate').value = toISODate(start);
+            document.getElementById('endDate').value = toISODate(end);
         }
 
         function setTable(columns, rows) {
@@ -177,6 +252,102 @@
 
             const body = document.getElementById('reportBody');
             body.innerHTML = `<tr><td style="text-align:center; padding: 2rem;">Cargando...</td></tr>`;
+
+            if (type === 'attendance') {
+                const start_date = document.getElementById('startDate').value;
+                const end_date = document.getElementById('endDate').value;
+
+                const params = {};
+                if (start_date) params.start_date = start_date;
+                if (end_date) params.end_date = end_date;
+
+                const allLogs = await attendanceAPI.getReport(params);
+                if (!allLogs || allLogs.length === 0) {
+                    setTable(['Fecha', 'Empleado', 'Ubicación', 'Fichajes'], [['Sin resultados']]);
+                    currentAttendanceLogs = [];
+                    return;
+                }
+
+                // Enriquecer con vacaciones
+                await enrichWithVacations(allLogs, start_date, end_date);
+                
+                // Generar logs sintéticos para vacaciones sin fichajes
+                const logsWithVacations = generateVacationDays(allLogs, start_date, end_date);
+
+                // Filtrar por ubicación si está seleccionada
+                const logs = location ? logsWithVacations.filter(log => log.location === location) : logsWithVacations;
+                
+                if (logs.length === 0) {
+                    setTable(['Fecha', 'Empleado', 'Ubicación', 'Fichajes'], [['Sin resultados para la ubicación seleccionada']]);
+                    currentAttendanceLogs = [];
+                    return;
+                }
+
+                // Guardar logs originales para exportación
+                currentAttendanceLogs = logs;
+
+                // Agrupar por empleado y fecha
+                const grouped = {};
+                logs.forEach(log => {
+                    const dateKey = new Date(log.timestamp).toISOString().split('T')[0];
+                    const key = `${log.employee_id}_${dateKey}`;
+
+                    if (!grouped[key]) {
+                        grouped[key] = {
+                            date: new Date(log.timestamp).toLocaleDateString('es-ES'),
+                            dateISO: dateKey,
+                            employee: log.full_name,
+                            location: log.location || '-',
+                            logs: []
+                        };
+                    }
+                    grouped[key].logs.push(log);
+                });
+
+                // Ordenar los grupos por fecha (descendente) y luego por empleado (alfabético)
+                const sortedGroups = Object.values(grouped).sort((a, b) => {
+                    const dateA = new Date(a.dateISO);
+                    const dateB = new Date(b.dateISO);
+                    
+                    // Primero ordenar por fecha (descendente - más reciente primero)
+                    if (dateB.getTime() !== dateA.getTime()) {
+                        return dateB - dateA;
+                    }
+                    
+                    // Si es la misma fecha, ordenar por nombre de empleado (alfabético)
+                    return a.employee.localeCompare(b.employee);
+                });
+
+                const emojis = { in: '🟢', out: '🔴', break_start: '🟠', break_end: '🔵' };
+                const columns = ['Fecha', 'Empleado', 'Ubicación', 'Fichajes'];
+                const rows = sortedGroups.map(g => {
+                    g.logs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    
+                    // Verificar si es un día de vacaciones sin fichajes
+                    if (g.logs.length === 1 && g.logs[0].isVacationDay) {
+                        return [
+                            g.date, 
+                            g.employee || '(Empleado)', 
+                            g.location || '-', 
+                            `🏖️ VACACIONES (${g.logs[0].dateRange})`
+                        ];
+                    }
+                    
+                    const fichajes = g.logs.map(l => {
+                        const time = new Date(l.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+                        return `${emojis[l.type]} ${time}`;
+                    }).join(' | ');
+
+                    return [g.date, g.employee, g.location, fichajes];
+                });
+
+                const title = `Fichajes (${start_date || '...'} a ${end_date || '...'})`;
+                const fileName = `Fichajes_${start_date}_${end_date}`;
+
+                currentExport = { title, columns, rows, fileName };
+                setTable(columns, rows);
+                return;
+            }
 
             if (type === 'vacation') {
                 const start_date = document.getElementById('startDate').value;
@@ -260,6 +431,50 @@
         }
 
         async function exportPDF() {
+            const reportTypeElement = document.getElementById('reportType');
+            if (!reportTypeElement) {
+                console.error('Element reportType not found');
+                showAlert('Error: No se pudo identificar el tipo de reporte', 'error');
+                return;
+            }
+            
+            const reportType = reportTypeElement.value;
+
+            // Si es reporte de fichajes, usar el formato especial
+            if (reportType === 'attendance') {
+                if (!currentAttendanceLogs || currentAttendanceLogs.length === 0) {
+                    showAlert('No hay datos de fichajes para exportar', 'warning');
+                    return;
+                }
+
+                // Preparar agrupación igual que attendance-admin.html
+                const grouped = {};
+                currentAttendanceLogs.forEach(log => {
+                    const dateKey = new Date(log.timestamp).toLocaleDateString('es-ES');
+                    const key = `${dateKey}_${log.dni || log.full_name}`;
+                    if (!grouped[key]) {
+                        grouped[key] = {
+                            date: dateKey,
+                            dateISO: new Date(log.timestamp).toISOString().split('T')[0],
+                            employee: log.full_name,
+                            employee_id: log.employee_id,
+                            dni: log.dni,
+                            location: log.location || '-',
+                            logs: []
+                        };
+                    }
+                    grouped[key].logs.push(log);
+                });
+
+                reportsUtil.exportGroupedAttendancePDF(
+                    'REGISTRO DIARIO DE JORNADA (Real Decreto-ley 8/2019)',
+                    grouped,
+                    'Registro_Jornada_Detallado'
+                );
+                return;
+            }
+
+            // Para otros tipos de reportes, usar el método anterior
             if (!currentExport || !currentExport.columns || currentExport.columns.length === 0) {
                 showAlert('Genera un reporte primero', 'warning');
                 return;
@@ -269,11 +484,15 @@
                 return;
             }
 
-            const reportType = document.getElementById('reportType').value;
-            const location = document.getElementById('location').value;
-            const start = document.getElementById('startDate').value;
-            const end = document.getElementById('endDate').value;
-            const month = document.getElementById('month').value;
+            const locationEl = document.getElementById('locationFilter');
+            const startEl = document.getElementById('startDate');
+            const endEl = document.getElementById('endDate');
+            const monthEl = document.getElementById('month');
+            
+            const location = locationEl ? locationEl.value : '';
+            const start = startEl ? startEl.value : '';
+            const end = endEl ? endEl.value : '';
+            const month = monthEl ? monthEl.value : '';
 
             const metaLines = [`Registros: ${currentExport.rows.length}`];
             if (location) metaLines.push(`Ubicación: ${location}`);
@@ -323,17 +542,147 @@
             }, 60 * 1000);
         }
 
+        async function enrichWithVacations(logs, startDate, endDate, employeeId) {
+            // Si se proporcionan parámetros, usarlos directamente; sino extraerlos de logs
+            let employeeIds, minDate, maxDate;
+            
+            if (employeeId && startDate && endDate) {
+                employeeIds = [employeeId];
+                minDate = startDate;
+                maxDate = endDate;
+            } else {
+                // Obtener empleados únicos y rango de fechas de los logs
+                employeeIds = [...new Set(logs.map(l => l.employee_id).filter(Boolean))];
+                if (employeeIds.length === 0) return;
+
+                const dates = logs.map(l => new Date(l.timestamp).toISOString().split('T')[0]);
+                minDate = dates.reduce((min, d) => d < min ? d : min, dates[0]);
+                maxDate = dates.reduce((max, d) => d > max ? d : max, dates[0]);
+            }
+
+            // Consultar vacaciones aprobadas en el rango
+            try {
+                const allVacations = [];
+                for (const empId of employeeIds) {
+                    const vacations = await vacationsAPI.getAll({ employee_id: empId });
+                    if (vacations && vacations.length > 0) {
+                        const approved = vacations.filter(v => v.status === 'approved');
+                        allVacations.push(...approved.map(v => ({ ...v, employee_id: empId })));
+                    }
+                }
+
+                // Crear mapa de empleado + fecha -> información de vacaciones
+                window.vacationsMap = {};
+                allVacations.forEach(vac => {
+                    const start = new Date(vac.start_date);
+                    const end = new Date(vac.end_date);
+                    
+                    // Formatear fechas para mostrar
+                    const startFormatted = start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+                    const endFormatted = end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const dateRange = `${startFormatted} - ${endFormatted}`;
+                    
+                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                        const dateKey = d.toISOString().split('T')[0];
+                        const mapKey = `${vac.employee_id}_${dateKey}`;
+                        window.vacationsMap[mapKey] = {
+                            hasVacation: true,
+                            dateRange: dateRange,
+                            startDate: vac.start_date,
+                            endDate: vac.end_date
+                        };
+                    }
+                });
+                console.log('Vacaciones cargadas en reports.html:', Object.keys(window.vacationsMap).length);
+            } catch (error) {
+                console.error('Error cargando vacaciones:', error);
+                window.vacationsMap = {};
+            }
+        }
+
+        // Función para generar logs sintéticos de días de vacaciones sin fichajes
+        function generateVacationDays(logs, startDate, endDate) {
+            if (!window.vacationsMap || Object.keys(window.vacationsMap).length === 0) {
+                return logs;
+            }
+
+            // Validar que tengamos fechas válidas
+            if (!startDate || !endDate) {
+                console.warn('No hay rango de fechas especificado para generar días de vacaciones');
+                return logs;
+            }
+
+            const allLogs = [...logs];
+            const existingDays = new Set();
+            
+            // Crear un mapa de employee_id -> datos del empleado
+            const employeeDataMap = {};
+            logs.forEach(log => {
+                if (log.employee_id && !employeeDataMap[log.employee_id]) {
+                    employeeDataMap[log.employee_id] = {
+                        full_name: log.full_name || '',
+                        dni: log.dni || '',
+                        location: log.location || ''
+                    };
+                }
+                
+                const dateKey = new Date(log.timestamp).toISOString().split('T')[0];
+                const mapKey = `${log.employee_id}_${dateKey}`;
+                existingDays.add(mapKey);
+            });
+
+            // Generar logs sintéticos para días de vacaciones sin fichajes
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            
+            // Validar que las fechas sean válidas
+            if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+                console.error('Fechas inválidas:', startDate, endDate);
+                return logs;
+            }
+            
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                const dateKey = d.toISOString().split('T')[0];
+                
+                // Revisar todos los empleados con vacaciones en este día
+                Object.keys(window.vacationsMap).forEach(mapKey => {
+                    if (mapKey.endsWith(`_${dateKey}`) && !existingDays.has(mapKey)) {
+                        const employeeId = mapKey.split('_')[0];
+                        const vacationInfo = window.vacationsMap[mapKey];
+                        const empData = employeeDataMap[employeeId] || {};
+                        
+                        // Crear log sintético con datos del empleado si están disponibles
+                        allLogs.push({
+                            employee_id: employeeId,
+                            timestamp: new Date(dateKey + 'T12:00:00').toISOString(),
+                            type: 'vacation',
+                            isVacationDay: true,
+                            full_name: empData.full_name || '(Empleado)',
+                            dni: empData.dni || '',
+                            location: empData.location || '-',
+                            dateRange: vacationInfo.dateRange
+                        });
+                    }
+                });
+            }
+
+            return allLogs;
+        }
+
         (function initDefaults() {
             const now = new Date();
             const yearStart = new Date(now.getFullYear(), 0, 1);
-            const yearEnd = new Date(now.getFullYear(), 11, 31);
-            document.getElementById('startDate').value = toISODate(yearStart);
-            document.getElementById('endDate').value = toISODate(yearEnd);
-            document.getElementById('month').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-            onReportTypeChange();
-        })();
+            const today = toISODate(now);
+            const ys = toISODate(yearStart);
 
-        initLocationFilter().catch(() => { /* no-op */ });
+            document.getElementById('startDate').value = ys;
+            document.getElementById('endDate').value = today;
+            document.getElementById('month').value = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+
+            initLocationFilter();
+            onReportTypeChange();
+            onPeriodChange();
+        })();
     </script>
 </body>
 

@@ -14,6 +14,182 @@ function showAlert(message, type = 'info') {
     }
 }
 
+let codeModalEls = null;
+let codeModalResolver = null;
+
+function initCodeModal() {
+    if (codeModalEls) return codeModalEls;
+
+    const modal = document.getElementById('code-modal');
+    const title = document.getElementById('code-modal-title');
+    const subtitle = document.getElementById('code-modal-subtitle');
+    const input = document.getElementById('code-input');
+    const toggle = document.getElementById('code-toggle-visibility');
+    const accept = document.getElementById('code-accept');
+    const cancel = document.getElementById('code-cancel');
+    const close = document.getElementById('code-modal-close');
+
+    if (!modal || !title || !subtitle || !input || !toggle || !accept || !cancel || !close) {
+        return null;
+    }
+
+    function setMasked(masked) {
+        input.type = masked ? 'password' : 'text';
+        toggle.textContent = masked ? 'Mostrar' : 'Ocultar';
+        toggle.setAttribute('aria-pressed', masked ? 'false' : 'true');
+    }
+
+    function updateAcceptEnabled() {
+        const v = String(input.value || '').trim();
+        accept.disabled = !v;
+    }
+
+    function closeWith(result) {
+        if (!modal.classList.contains('active')) return;
+        modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
+        setMasked(true);
+
+        const resolve = codeModalResolver;
+        codeModalResolver = null;
+        if (typeof resolve === 'function') resolve(result);
+    }
+
+    // Cerrar al pulsar fuera del contenido
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeWith(null);
+    });
+
+    // Cerrar con Escape / confirmar con Enter
+    document.addEventListener('keydown', (e) => {
+        if (!modal.classList.contains('active')) return;
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeWith(null);
+            return;
+        }
+        if (e.key === 'Enter') {
+            const v = String(input.value || '').trim();
+            if (!v) return;
+            e.preventDefault();
+            closeWith(v);
+        }
+    });
+
+    toggle.addEventListener('click', () => {
+        const masked = input.type !== 'text';
+        setMasked(!masked);
+        input.focus();
+    });
+
+    input.addEventListener('input', () => {
+        // Mantener sólo dígitos (sin bloquear pegado, simplemente limpiamos)
+        const raw = String(input.value || '');
+        const digits = raw.replace(/\D+/g, '');
+        if (raw !== digits) input.value = digits;
+        updateAcceptEnabled();
+    });
+
+    accept.addEventListener('click', () => {
+        const v = String(input.value || '').trim();
+        if (!v) return;
+        closeWith(v);
+    });
+
+    cancel.addEventListener('click', () => closeWith(null));
+    close.addEventListener('click', () => closeWith(null));
+
+    // Teclado numérico (delegación)
+    modal.querySelector('.code-keypad')?.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target || target.tagName !== 'BUTTON') return;
+
+        const key = target.getAttribute('data-key');
+        const action = target.getAttribute('data-action');
+
+        if (key) {
+            input.value = `${String(input.value || '')}${key}`;
+            updateAcceptEnabled();
+            input.focus();
+            return;
+        }
+
+        if (action === 'backspace') {
+            input.value = String(input.value || '').slice(0, -1);
+            updateAcceptEnabled();
+            input.focus();
+            return;
+        }
+
+        if (action === 'clear') {
+            input.value = '';
+            updateAcceptEnabled();
+            input.focus();
+        }
+    });
+
+    codeModalEls = {
+        modal,
+        title,
+        subtitle,
+        input,
+        toggle,
+        accept,
+        setMasked,
+        updateAcceptEnabled,
+        closeWith
+    };
+
+    return codeModalEls;
+}
+
+function promptCodeModal({ title, subtitle }) {
+    const els = initCodeModal();
+    if (!els) {
+        // Fallback (no debería ocurrir)
+        // eslint-disable-next-line no-alert
+        const v = window.prompt(title || 'Introduce el código');
+        return Promise.resolve(v === null ? null : String(v || '').trim());
+    }
+
+    els.title.textContent = String(title || 'Introduce tu código');
+    els.subtitle.textContent = String(subtitle || '');
+    els.input.value = '';
+    els.setMasked(true);
+    els.updateAcceptEnabled();
+
+    els.modal.classList.add('active');
+    els.modal.setAttribute('aria-hidden', 'false');
+
+    // Si había un prompt anterior colgado, cancelarlo
+    if (typeof codeModalResolver === 'function') {
+        try { codeModalResolver(null); } catch (_) { /* no-op */ }
+    }
+
+    return new Promise((resolve) => {
+        codeModalResolver = resolve;
+        setTimeout(() => {
+            try { els.input.focus(); } catch (_) { /* no-op */ }
+        }, 0);
+    });
+}
+
+async function promptStorePinIntoInput() {
+    const pinInput = document.getElementById('store-pin');
+    if (!pinInput) return;
+
+    const storeName = (document.getElementById('store-name')?.value || '').trim();
+    const subtitle = storeName ? `Tienda: ${storeName}` : 'Introduce el PIN de tienda';
+
+    const pin = await promptCodeModal({
+        title: 'PIN de tienda',
+        subtitle
+    });
+
+    if (pin === null) return; // cancel
+    pinInput.value = String(pin || '').trim();
+}
+
 function isNativeCapacitor() {
     try {
         return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
@@ -269,9 +445,16 @@ async function handleMustChangeFlow(dni, currentCode) {
     }
 
     // 2) Pedir nuevo código
-    const newCode1 = window.prompt('Debes cambiar tu código de acceso. Introduce el nuevo código:');
+    const newCode1 = await promptCodeModal({
+        title: 'Debes cambiar tu código de acceso',
+        subtitle: 'Introduce el nuevo código'
+    });
     if (newCode1 === null) return null;
-    const newCode2 = window.prompt('Repite el nuevo código:');
+
+    const newCode2 = await promptCodeModal({
+        title: 'Debes cambiar tu código de acceso',
+        subtitle: 'Repite el nuevo código'
+    });
     if (newCode2 === null) return null;
 
     const a = String(newCode1 || '').trim();
@@ -367,7 +550,10 @@ function renderEmployees(employees) {
                 return;
             }
 
-            const code = window.prompt(`Código de acceso para ${emp.full_name} (${empDni})`);
+            const code = await promptCodeModal({
+                title: 'Código de acceso',
+                subtitle: `${emp.full_name || 'Empleado'} (${empDni})`
+            });
             if (code === null) return; // cancel
             if (!String(code).trim()) {
                 showAlert('Código requerido', 'error');
@@ -477,11 +663,20 @@ async function refreshEmployees() {
 
 async function onLoginClick() {
     const storeName = (document.getElementById('store-name').value || '').trim();
-    const pin = (document.getElementById('store-pin').value || '').trim();
+    let pin = (document.getElementById('store-pin').value || '').trim();
 
-    if (!storeName || !pin) {
+    if (!storeName) {
         showAlert('Introduce nombre de tienda y PIN', 'error');
         return;
+    }
+
+    if (!pin) {
+        await promptStorePinIntoInput();
+        pin = (document.getElementById('store-pin').value || '').trim();
+        if (!pin) {
+            showAlert('Introduce nombre de tienda y PIN', 'error');
+            return;
+        }
     }
 
     const data = await storeLogin(storeName, pin);
@@ -509,6 +704,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('store-pin')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') onLoginClick();
     });
+
+    // En móvil/tablet: usar modal numérico para el PIN de tienda
+    // (sin impedir que el usuario pueda teclear si lo prefiere)
+    const storePinInput = document.getElementById('store-pin');
+    if (storePinInput) {
+        let opening = false;
+        storePinInput.addEventListener('click', async () => {
+            if (opening) return;
+            opening = true;
+            try {
+                await promptStorePinIntoInput();
+            } finally {
+                opening = false;
+            }
+        });
+
+        storePinInput.addEventListener('focus', async () => {
+            // Evitar que el focus por tab/teclado abra el modal en escritorio
+            // pero en pantallas táctiles suele venir de tap; click ya lo cubre.
+        });
+    }
 
     // Si la URL fuerza una tienda distinta a la sesión, invalidar sesión
     const urlStore = getUrlStoreName();

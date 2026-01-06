@@ -221,6 +221,27 @@
                 <button onclick="saveVacationPolicy()" class="btn btn-primary" style="margin-top: 1rem;">💾 Guardar saldo anual avanzado</button>
             </div>
 
+            <!-- PINs de Regularización -->
+            <div class="settings-section" id="regularizationPinsSection">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🔢 PINs de Regularización</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                    Códigos de 4 dígitos para acceder al panel de regularización de fichajes. Este panel permite ajustar manualmente los registros de asistencia.
+                </p>
+                <div class="grid grid-cols-2">
+                    <div class="form-group">
+                        <label class="form-label">PIN Administrador</label>
+                        <input type="text" id="regularizationAdminPin" class="form-control" placeholder="1234" maxlength="4" pattern="[0-9]{4}" inputmode="numeric">
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">4 dígitos numéricos. Por defecto: 1234</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PIN Coordinador</label>
+                        <input type="text" id="regularizationCoordinatorPin" class="form-control" placeholder="5678" maxlength="4" pattern="[0-9]{4}" inputmode="numeric">
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">4 dígitos numéricos. Por defecto: 5678</p>
+                    </div>
+                </div>
+                <button onclick="saveRegularizationPins()" class="btn btn-primary" style="margin-top: 1rem;">💾 Guardar PINs</button>
+            </div>
+
             <!-- Gestión de Administrador -->
             <div class="settings-section" id="adminSection">
                 <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🛡️ Gestión de Administrador</h2>
@@ -502,6 +523,10 @@
                     document.getElementById('companyName').value = settings.company_name || '';
                     document.getElementById('companyCif').value = settings.company_cif || '';
                     document.getElementById('companyAddress').value = settings.company_address || '';
+                    
+                    // Cargar PINs de regularización
+                    document.getElementById('regularizationAdminPin').value = settings.regularization_admin_pin || '1234';
+                    document.getElementById('regularizationCoordinatorPin').value = settings.regularization_coordinator_pin || '5678';
 
                     if (settings.logo_base64) {
                         currentLogoBase64 = settings.logo_base64;
@@ -614,6 +639,36 @@
                 <img src="${src}" style="height: 30px; width: auto; max-width: 30px; object-fit: contain;">
                 <span>Gestión RH</span>
             `;
+        }
+
+        // Guardar PINs de regularización
+        async function saveRegularizationPins() {
+            const adminPin = document.getElementById('regularizationAdminPin').value.trim();
+            const coordinatorPin = document.getElementById('regularizationCoordinatorPin').value.trim();
+
+            // Validación
+            if (adminPin && !/^\d{4}$/.test(adminPin)) {
+                showAlert('El PIN de administrador debe ser exactamente 4 dígitos numéricos', 'warning');
+                return;
+            }
+            if (coordinatorPin && !/^\d{4}$/.test(coordinatorPin)) {
+                showAlert('El PIN de coordinador debe ser exactamente 4 dígitos numéricos', 'warning');
+                return;
+            }
+            if (adminPin && coordinatorPin && adminPin === coordinatorPin) {
+                showAlert('Los PINs deben ser diferentes entre sí', 'warning');
+                return;
+            }
+
+            const data = {
+                regularization_admin_pin: adminPin || '1234',
+                regularization_coordinator_pin: coordinatorPin || '5678'
+            };
+
+            const result = await settingsAPI.update(data);
+            if (result) {
+                showAlert('PINs de regularización actualizados correctamente', 'success');
+            }
         }
 
         // Guardar configuración de empresa

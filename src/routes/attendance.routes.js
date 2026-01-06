@@ -503,4 +503,405 @@ router.get('/compliance', async (req, res) => {
     }
 });
 
+// Regularizar fichajes de un empleado en una fecha específica
+// Ajusta los timestamps según el horario configurado manteniendo la geolocalización
+router.post('/regularize/:employeeId/:date', async (req, res) => {
+    try {
+        const { employeeId, date } = req.params;
+        const { target_hours } = req.body; // Horas personalizadas desde el frontend
+
+        // Verificar acceso
+        const hasAccess = await requireFeatureAccess(req, res, 'attendance');
+        if (!hasAccess) return;
+
+        const ok = await ensureEmployeeInScope(req, res, employeeId);
+        if (!ok) return;
+
+        // Validar formato de fecha YYYY-MM-DD
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ error: 'Formato de fecha inválido. Use YYYY-MM-DD' });
+        }
+
+        // Obtener empleado y su horario
+        const employee = await Employee.findById(employeeId).lean();
+        if (!employee) {
+            return res.status(404).json({ error: 'Empleado no encontrado' });
+        }
+
+        console.log('Empleado encontrado:', employee.full_name);
+        console.log('Horario configurado:', JSON.stringify(employee.work_schedule, null, 2));
+
+        const schedule = employee.work_schedule;
+        const targetDate = new Date(date + 'T12:00:00');
+        const dow = targetDate.getDay(); // 0=Domingo, 6=Sábado
+        
+        console.log('Fecha objetivo:', date, 'Día de semana:', dow);
+        
+        let finalSchedule = {
+            start_time: '09:00',
+            end_time: '18:00',
+            break_start: null,
+            break_end: null,
+            workingDay: true
+        };
+
+        // Si el empleado tiene horario configurado, usarlo como base
+        if (schedule && schedule.enabled) {
+            if (isValidTimeHHmm(schedule.start_time) && isValidTimeHHmm(schedule.end_time)) {
+                console.log('Obteniendo horario del día...');
+                const daySchedule = getScheduleForDay(schedule, date, dow);
+                console.log('Horario del día obtenido:', JSON.stringify(daySchedule, null, 2));
+                finalSchedule = { ...daySchedule };
+            } else {
+                console.log('Horario base inválido, usando valores por defecto');
+            }
+        } else {
+            console.log('Horario no habilitado o no existe, usando valores por defecto');
+        }
+
+        // Si se proporcionaron horas personalizadas, tienen prioridad (funciona con o sin horario configurado)
+        if (target_hours) {
+            if (target_hours.start_time && isValidTimeHHmm(target_hours.start_time)) {
+                finalSchedule.start_time = target_hours.start_time;
+                finalSchedule.workingDay = true; // Forzar día laborable si hay horas personalizadas
+            }
+            if (target_hours.end_time && isValidTimeHHmm(target_hours.end_time)) {
+                finalSchedule.end_time = target_hours.end_time;
+            }
+            if (target_hours.break_start && isValidTimeHHmm(target_hours.break_start)) {
+                finalSchedule.break_start = target_hours.break_start;
+            }
+            if (target_hours.break_end && isValidTimeHHmm(target_hours.break_end)) {
+                finalSchedule.break_end = target_hours.break_end;
+            }
+        } else {
+            // Si no hay horas personalizadas Y no hay horario configurado, error
+            if (!schedule || !schedule.enabled || !isValidTimeHHmm(schedule.start_time) || !isValidTimeHHmm(schedule.end_time)) {
+                return res.status(400).json({ error: 'Debe especificar las horas de ajuste o el empleado debe tener horario configurado' });
+            }
+            // Verificar si el día es laborable solo cuando NO hay horas personalizadas
+            if (!finalSchedule.workingDay) {
+                return res.status(400).json({ error: 'Este día no es laborable según el horario configurado. Use horas personalizadas para regularizar de todos modos.' });
+            }
+        }
+
+        // Obtener fichajes existentes de ese día
+        const dayStart = startOfDayLocal(targetDate);
+        const dayEnd = endOfDayLocal(targetDate);
+
+        const logs = await Attendance.find({
+            employee_id: employeeId,
+            timestamp: { $gte: dayStart, $lte: dayEnd }
+        }).sort({ timestamp: 1 }).lean();
+
+        if (logs.length === 0) {
+            return res.status(400).json({ error: 'No hay fichajes para este día' });
+        }
+
+        // Separar por tipo
+        const inLogs = logs.filter(l => l.type === 'in');
+        const outLogs = logs.filter(l => l.type === 'out');
+        const breakStartLogs = logs.filter(l => l.type === 'break_start');
+        const breakEndLogs = logs.filter(l => l.type === 'break_end');
+
+        // Función auxiliar para añadir variación aleatoria de minutos (±7-8 minutos)
+        function addRandomVariation(date) {
+            const variation = Math.floor(Math.random() * 16) - 8; // -8 a +7 minutos
+            const newDate = new Date(date);
+            newDate.setMinutes(newDate.getMinutes() + variation);
+            return newDate;
+        }
+
+        // Construir timestamps objetivo según el horario
+        const targetTimestamps = {};
+        
+        // Entrada: usar start_time del horario final con variación
+        if (inLogs.length > 0) {
+            const [hours, minutes] = finalSchedule.start_time.split(':').map(Number);
+            const targetIn = new Date(targetDate);
+            targetIn.setHours(hours, minutes, 0, 0);
+            targetTimestamps.in = addRandomVariation(targetIn);
+        }
+
+        // Salida: usar end_time del horario final con variación
+        if (outLogs.length > 0) {
+            const [hours, minutes] = finalSchedule.end_time.split(':').map(Number);
+            const targetOut = new Date(targetDate);
+            targetOut.setHours(hours, minutes, 0, 0);
+            targetTimestamps.out = addRandomVariation(targetOut);
+        }
+
+        // Descansos: usar break_start y break_end si están configurados con variación
+        if (finalSchedule.break_start && isValidTimeHHmm(finalSchedule.break_start) && breakStartLogs.length > 0) {
+            const [hours, minutes] = finalSchedule.break_start.split(':').map(Number);
+            const targetBreakStart = new Date(targetDate);
+            targetBreakStart.setHours(hours, minutes, 0, 0);
+            targetTimestamps.break_start = addRandomVariation(targetBreakStart);
+        }
+
+        if (finalSchedule.break_end && isValidTimeHHmm(finalSchedule.break_end) && breakEndLogs.length > 0) {
+            const [hours, minutes] = finalSchedule.break_end.split(':').map(Number);
+            const targetBreakEnd = new Date(targetDate);
+            targetBreakEnd.setHours(hours, minutes, 0, 0);
+            targetTimestamps.break_end = addRandomVariation(targetBreakEnd);
+        }
+
+        // Actualizar los fichajes manteniendo geolocalización y otros datos
+        const updates = [];
+        const auditBefore = [];
+        const auditAfter = [];
+
+        // Actualizar entrada (primer registro de 'in')
+        if (targetTimestamps.in && inLogs.length > 0) {
+            const log = inLogs[0];
+            auditBefore.push({ type: 'in', timestamp: log.timestamp, _id: log._id });
+            await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.in });
+            auditAfter.push({ type: 'in', timestamp: targetTimestamps.in, _id: log._id });
+            updates.push({ type: 'in', from: log.timestamp, to: targetTimestamps.in });
+        }
+
+        // Actualizar salida (último registro de 'out')
+        if (targetTimestamps.out && outLogs.length > 0) {
+            const log = outLogs[outLogs.length - 1];
+            auditBefore.push({ type: 'out', timestamp: log.timestamp, _id: log._id });
+            await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.out });
+            auditAfter.push({ type: 'out', timestamp: targetTimestamps.out, _id: log._id });
+            updates.push({ type: 'out', from: log.timestamp, to: targetTimestamps.out });
+        }
+
+        // Actualizar inicio descanso (primer registro de 'break_start')
+        if (targetTimestamps.break_start && breakStartLogs.length > 0) {
+            const log = breakStartLogs[0];
+            auditBefore.push({ type: 'break_start', timestamp: log.timestamp, _id: log._id });
+            await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.break_start });
+            auditAfter.push({ type: 'break_start', timestamp: targetTimestamps.break_start, _id: log._id });
+            updates.push({ type: 'break_start', from: log.timestamp, to: targetTimestamps.break_start });
+        }
+
+        // Actualizar fin descanso (primer registro de 'break_end')
+        if (targetTimestamps.break_end && breakEndLogs.length > 0) {
+            const log = breakEndLogs[0];
+            auditBefore.push({ type: 'break_end', timestamp: log.timestamp, _id: log._id });
+            await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.break_end });
+            auditAfter.push({ type: 'break_end', timestamp: targetTimestamps.break_end, _id: log._id });
+            updates.push({ type: 'break_end', from: log.timestamp, to: targetTimestamps.break_end });
+        }
+
+        // Registrar en audit log
+        const AuditLog = require('../models/AuditLog');
+        await AuditLog.create({
+            actor: {
+                user_id: req.user._id,
+                username: req.user.username,
+                role: req.user.role || 'admin'
+            },
+            action: 'attendance.regularize',
+            entity: {
+                type: 'Attendance',
+                id: String(employeeId)
+            },
+            employee: {
+                id: String(employeeId),
+                location: employee.location || ''
+            },
+            before: auditBefore,
+            after: auditAfter,
+            meta: {
+                date,
+                updatesCount: updates.length,
+                schedule: {
+                    start_time: finalSchedule.start_time,
+                    end_time: finalSchedule.end_time,
+                    break_start: finalSchedule.break_start || null,
+                    break_end: finalSchedule.break_end || null
+                },
+                customHours: target_hours ? true : false
+            }
+        });
+
+        res.json({
+            message: 'Fichajes regularizados correctamente',
+            updates,
+            date,
+            employee: employee.full_name
+        });
+
+    } catch (error) {
+        console.error('Error al regularizar fichajes:', error);
+        console.error('Stack trace:', error.stack);
+        res.status(500).json({ 
+            error: 'Error al regularizar fichajes',
+            details: error.message 
+        });
+    }
+});
+
+// Ruta para regularización masiva de múltiples días
+router.post('/regularize-bulk', async (req, res) => {
+    try {
+        const { employeeId, dates, target_hours } = req.body;
+
+        // Verificar acceso
+        const hasAccess = await requireFeatureAccess(req, res, 'attendance');
+        if (!hasAccess) return;
+
+        const ok = await ensureEmployeeInScope(req, res, employeeId);
+        if (!ok) return;
+
+        if (!employeeId || !dates || !Array.isArray(dates) || dates.length === 0) {
+            return res.status(400).json({ error: 'Debe proporcionar employeeId y un array de fechas' });
+        }
+
+        if (!target_hours || !target_hours.start_time || !target_hours.end_time) {
+            return res.status(400).json({ error: 'Debe especificar start_time y end_time en target_hours' });
+        }
+
+        // Obtener empleado
+        const employee = await Employee.findById(employeeId).lean();
+        if (!employee) {
+            return res.status(404).json({ error: 'Empleado no encontrado' });
+        }
+
+        const results = {
+            success: [],
+            failed: [],
+            totalDays: dates.length
+        };
+
+        // Procesar cada fecha
+        for (const date of dates) {
+            try {
+                // Validar formato de fecha
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                    results.failed.push({ date, error: 'Formato de fecha inválido' });
+                    continue;
+                }
+
+                const targetDate = new Date(date + 'T12:00:00');
+                
+                // Preparar horario final con variación
+                const finalSchedule = {
+                    start_time: target_hours.start_time,
+                    end_time: target_hours.end_time,
+                    break_start: target_hours.break_start || null,
+                    break_end: target_hours.break_end || null,
+                    workingDay: true
+                };
+
+                // Obtener fichajes del día
+                const dayStart = startOfDayLocal(targetDate);
+                const dayEnd = endOfDayLocal(targetDate);
+
+                const logs = await Attendance.find({
+                    employee_id: employeeId,
+                    timestamp: { $gte: dayStart, $lte: dayEnd }
+                }).sort({ timestamp: 1 }).lean();
+
+                if (logs.length === 0) {
+                    results.failed.push({ date, error: 'No hay fichajes' });
+                    continue;
+                }
+
+                // Separar por tipo
+                const inLogs = logs.filter(l => l.type === 'in');
+                const outLogs = logs.filter(l => l.type === 'out');
+                const breakStartLogs = logs.filter(l => l.type === 'break_start');
+                const breakEndLogs = logs.filter(l => l.type === 'break_end');
+
+                // Función para añadir variación aleatoria
+                function addRandomVariation(date) {
+                    const variation = Math.floor(Math.random() * 16) - 8; // -8 a +7 minutos
+                    const newDate = new Date(date);
+                    newDate.setMinutes(newDate.getMinutes() + variation);
+                    return newDate;
+                }
+
+                const targetTimestamps = {};
+                const updates = [];
+
+                // Entrada
+                if (inLogs.length > 0) {
+                    const [hours, minutes] = finalSchedule.start_time.split(':').map(Number);
+                    const targetIn = new Date(targetDate);
+                    targetIn.setHours(hours, minutes, 0, 0);
+                    targetTimestamps.in = addRandomVariation(targetIn);
+                    
+                    const log = inLogs[0];
+                    await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.in });
+                    updates.push({ type: 'in', from: log.timestamp, to: targetTimestamps.in });
+                }
+
+                // Salida
+                if (outLogs.length > 0) {
+                    const [hours, minutes] = finalSchedule.end_time.split(':').map(Number);
+                    const targetOut = new Date(targetDate);
+                    targetOut.setHours(hours, minutes, 0, 0);
+                    targetTimestamps.out = addRandomVariation(targetOut);
+                    
+                    const log = outLogs[outLogs.length - 1];
+                    await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.out });
+                    updates.push({ type: 'out', from: log.timestamp, to: targetTimestamps.out });
+                }
+
+                // Descanso inicio
+                if (finalSchedule.break_start && isValidTimeHHmm(finalSchedule.break_start) && breakStartLogs.length > 0) {
+                    const [hours, minutes] = finalSchedule.break_start.split(':').map(Number);
+                    const targetBreakStart = new Date(targetDate);
+                    targetBreakStart.setHours(hours, minutes, 0, 0);
+                    targetTimestamps.break_start = addRandomVariation(targetBreakStart);
+                    
+                    const log = breakStartLogs[0];
+                    await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.break_start });
+                    updates.push({ type: 'break_start', from: log.timestamp, to: targetTimestamps.break_start });
+                }
+
+                // Descanso fin
+                if (finalSchedule.break_end && isValidTimeHHmm(finalSchedule.break_end) && breakEndLogs.length > 0) {
+                    const [hours, minutes] = finalSchedule.break_end.split(':').map(Number);
+                    const targetBreakEnd = new Date(targetDate);
+                    targetBreakEnd.setHours(hours, minutes, 0, 0);
+                    targetTimestamps.break_end = addRandomVariation(targetBreakEnd);
+                    
+                    const log = breakEndLogs[0];
+                    await Attendance.findByIdAndUpdate(log._id, { timestamp: targetTimestamps.break_end });
+                    updates.push({ type: 'break_end', from: log.timestamp, to: targetTimestamps.break_end });
+                }
+
+                // Registrar en audit log
+                const AuditLog = require('../models/AuditLog');
+                await AuditLog.create({
+                    user_id: req.user._id,
+                    username: req.user.username,
+                    action: 'attendance.regularize.bulk',
+                    entityType: 'Attendance',
+                    entityId: String(employeeId),
+                    employeeId: String(employeeId),
+                    employeeLocation: employee.location || '',
+                    meta: {
+                        date,
+                        updatesCount: updates.length,
+                        schedule: finalSchedule,
+                        bulkOperation: true
+                    }
+                });
+
+                results.success.push({ date, updates: updates.length });
+
+            } catch (error) {
+                console.error(`Error al regularizar fecha ${date}:`, error);
+                results.failed.push({ date, error: error.message });
+            }
+        }
+
+        res.json({
+            message: `Regularización masiva completada: ${results.success.length} días procesados correctamente, ${results.failed.length} fallidos`,
+            results
+        });
+
+    } catch (error) {
+        console.error('Error en regularización masiva:', error);
+        res.status(500).json({ error: 'Error en regularización masiva' });
+    }
+});
+
 module.exports = router;

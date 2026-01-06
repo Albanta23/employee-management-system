@@ -130,7 +130,7 @@
         }
 
         async function loadAttendance() {
-            const date = document.getElementById('startDate').value; // Assuming startDate is used as 'date' for filtering
+            const date = document.getElementById('startDate').value;
             const employeeId = document.getElementById('employeeSelect').value;
 
             const params = {};
@@ -138,10 +138,151 @@
             if (employeeId) params.employee_id = employeeId;
 
             const logs = await attendanceAPI.getReport(params);
-            if (logs) {
-                currentLogs = logs;
-                renderTable(logs);
+            
+            // Calcular rango de fechas para vacaciones
+            let vacationStartDate = params.start_date;
+            let vacationEndDate = params.end_date;
+            
+            // Si no hay fechas de filtro pero hay logs, usar el rango de los logs
+            if ((!vacationStartDate || !vacationEndDate) && logs && logs.length > 0) {
+                const dates = logs.map(l => new Date(l.timestamp).toISOString().split('T')[0]);
+                vacationStartDate = dates.reduce((min, d) => d < min ? d : min, dates[0]);
+                vacationEndDate = dates.reduce((max, d) => d > max ? d : max, dates[0]);
             }
+            
+            // Enriquecer con vacaciones
+            await enrichWithVacations(logs || [], vacationStartDate, vacationEndDate, params.employee_id);
+            
+            // Generar días de vacaciones sin fichajes
+            const enrichedLogs = await generateVacationDays(logs || [], vacationStartDate, vacationEndDate, params.employee_id);
+            
+            currentLogs = enrichedLogs;
+            renderTable(enrichedLogs);
+        }
+
+        async function enrichWithVacations(logs, startDate, endDate, employeeId) {
+            // Determinar qué empleados consultar
+            let employeeIds = [];
+            
+            if (employeeId) {
+                employeeIds = [employeeId];
+            } else {
+                const logsEmployees = [...new Set(logs.map(l => l.employee_id).filter(Boolean))];
+                if (logsEmployees.length > 0) {
+                    employeeIds = logsEmployees;
+                } else {
+                    window.vacationsMap = {};
+                    return;
+                }
+            }
+
+            try {
+                const allVacations = [];
+                for (const empId of employeeIds) {
+                    const vacations = await vacationsAPI.getAll({ employee_id: empId });
+                    if (vacations && vacations.length > 0) {
+                        const approved = vacations.filter(v => v.status === 'approved');
+                        allVacations.push(...approved.map(v => ({ ...v, employee_id: empId })));
+                    }
+                }
+
+                // Crear mapa de empleado + fecha -> información de vacaciones
+                window.vacationsMap = {};
+                allVacations.forEach(vac => {
+                    const start = new Date(vac.start_date);
+                    const end = new Date(vac.end_date);
+                    
+                    // Formatear fechas para mostrar
+                    const startFormatted = start.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+                    const endFormatted = end.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const dateRange = `${startFormatted} - ${endFormatted}`;
+                    
+                    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                        const dateKey = d.toISOString().split('T')[0];
+                        const mapKey = `${vac.employee_id}_${dateKey}`;
+                        window.vacationsMap[mapKey] = {
+                            hasVacation: true,
+                            dateRange: dateRange,
+                            startDate: vac.start_date,
+                            endDate: vac.end_date
+                        };
+                    }
+                });
+            } catch (error) {
+                console.error('Error cargando vacaciones:', error);
+                window.vacationsMap = {};
+            }
+        }
+
+        async function generateVacationDays(logs, startDate, endDate, employeeId) {
+            if (!window.vacationsMap || Object.keys(window.vacationsMap).length === 0) {
+                return logs;
+            }
+
+            // Si no hay rango de fechas, no generar días sintéticos
+            if (!startDate || !endDate) {
+                return logs;
+            }
+
+            const employeeCache = {};
+            
+            if (employeeId) {
+                try {
+                    const response = await fetch(`/api/employees/${employeeId}`, {
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                    });
+                    if (response.ok) {
+                        employeeCache[employeeId] = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Error obteniendo empleado:', error);
+                }
+            }
+
+            const syntheticLogs = [];
+            
+            for (const [mapKey, vacationInfo] of Object.entries(window.vacationsMap)) {
+                const [empId, dateISO] = mapKey.split('_');
+                
+                if (startDate && dateISO < startDate) continue;
+                if (endDate && dateISO > endDate) continue;
+                if (employeeId && empId !== employeeId) continue;
+                
+                const existingLog = logs.find(l => {
+                    const logDate = new Date(l.timestamp).toISOString().split('T')[0];
+                    return l.employee_id === empId && logDate === dateISO;
+                });
+                
+                if (!existingLog) {
+                    if (!employeeCache[empId]) {
+                        try {
+                            const response = await fetch(`/api/employees/${empId}`, {
+                                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                            });
+                            if (response.ok) {
+                                employeeCache[empId] = await response.json();
+                            }
+                        } catch (error) {
+                            console.error('Error obteniendo empleado:', error);
+                        }
+                    }
+                    
+                    const employee = employeeCache[empId];
+                    if (employee) {
+                        syntheticLogs.push({
+                            timestamp: new Date(dateISO + 'T12:00:00').toISOString(),
+                            employee_id: empId,
+                            full_name: employee.full_name,
+                            dni: employee.dni,
+                            location: employee.location || '-',
+                            type: 'vacation',
+                            isVacationDay: true
+                        });
+                    }
+                }
+            }
+            
+            return [...logs, ...syntheticLogs];
         }
 
         function renderTable(logs) {
@@ -161,7 +302,9 @@
                 if (!grouped[key]) {
                     grouped[key] = {
                         date: dateKey,
+                        dateISO: new Date(log.timestamp).toISOString().split('T')[0],
                         employee: log.full_name,
+                        employee_id: log.employee_id,
                         dni: log.dni,
                         logs: []
                     };
@@ -170,9 +313,16 @@
             });
 
             const sortedKeys = Object.keys(grouped).sort((a, b) => {
-                const dateA = grouped[a].logs[0].timestamp;
-                const dateB = grouped[b].logs[0].timestamp;
-                return new Date(dateB) - new Date(dateA);
+                const dateA = new Date(grouped[a].dateISO);
+                const dateB = new Date(grouped[b].dateISO);
+                
+                // Primero ordenar por fecha (descendente - más reciente primero)
+                if (dateB.getTime() !== dateA.getTime()) {
+                    return dateB - dateA;
+                }
+                
+                // Si es la misma fecha, ordenar por nombre de empleado (alfabético)
+                return grouped[a].employee.localeCompare(grouped[b].employee);
             });
 
             const emojis = { in: '🟢', out: '🔴', break_start: '🟠', break_end: '🔵' };
@@ -184,6 +334,17 @@
                 group.logs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
                 const rowId = `details-${index}`;
+                
+                // Verificar si tiene vacaciones
+                const vacationKey = `${group.employee_id}_${group.dateISO}`;
+                const vacationInfo = window.vacationsMap && window.vacationsMap[vacationKey];
+                const hasVacation = vacationInfo && vacationInfo.hasVacation;
+                
+                // Crear badge de vacaciones con rango de fechas
+                let vacationBadge = '';
+                if (hasVacation) {
+                    vacationBadge = `<span class="badge badge-warning" title="Vacaciones: ${vacationInfo.dateRange}" style="cursor: help;">VACACIONES (${vacationInfo.dateRange})</span>`;
+                }
 
                 html += `
                 <tr class="group-header" onclick="toggleDetails('${rowId}')" style="cursor: pointer; background: rgba(255,255,255,0.02);">
@@ -192,6 +353,7 @@
                     <td>${group.dni || '-'}</td>
                     <td colspan="3">
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            ${vacationBadge}
                             <span class="badge badge-info">${group.logs.length} registros</span>
                             <small style="color: var(--text-muted);">(Clic para ver detalles)</small>
                         </div>
@@ -200,7 +362,7 @@
                         <span id="icon-${rowId}">▼</span>
                     </td>
                 </tr>
-                <tr id="${rowId}" style="display: none; background: rgba(0,0,0,0.2);">
+                <tr id="${rowId}" style="display: none; background: rgba(0,0,0,0.2);">>
                     <td colspan="7" style="padding: 0;">
                         <div style="padding: 1rem 2rem;">
                             <table class="table" style="width: 100%; font-size: 0.9em;">
@@ -214,6 +376,17 @@
                                 </thead>
                                 <tbody>
                                     ${group.logs.map(log => {
+                    // Si es un día de vacaciones sin fichajes reales
+                    if (log.isVacationDay) {
+                        return `
+                                        <tr>
+                                            <td colspan="4" style="text-align: center; padding: 1rem; color: var(--warning);">
+                                                <strong>Sin fichajes (Vacaciones: ${vacationInfo.dateRange})</strong>
+                                            </td>
+                                        </tr>
+                                        `;
+                    }
+                    
                     const hasCoords = log && log.latitude != null && log.longitude != null;
                     const geoInfo = hasCoords
                         ? `<a href="https://www.google.com/maps?q=${log.latitude},${log.longitude}" target="_blank" style="color: var(--primary-light); text-decoration: none;">📍 Ver Mapa</a>`
@@ -273,7 +446,9 @@
                 if (!grouped[key]) {
                     grouped[key] = {
                         date: dateKey,
+                        dateISO: new Date(log.timestamp).toISOString().split('T')[0],
                         employee: log.full_name,
+                        employee_id: log.employee_id,
                         dni: log.dni,
                         location: log.location || '-',
                         logs: []

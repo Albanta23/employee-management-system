@@ -407,5 +407,29 @@
         createThemeToggleButton();
         // Don’t block page load; fire and forget.
         loadAndApplyCompanyBranding().catch(() => { /* no-op */ });
-    });
+        // Añadir click handler al logo para acceso a regularización
+        const sidebarLogo = document.querySelector('.sidebar-logo');
+        if (sidebarLogo) {
+            let clickCount = 0;
+            let clickTimer = null;
+
+            sidebarLogo.style.cursor = 'pointer';
+            sidebarLogo.addEventListener('click', () => {
+                clickCount++;
+
+                if (clickTimer) clearTimeout(clickTimer);
+
+                // Si hace 5 clics en 3 segundos, redirigir a regularización
+                if (clickCount >= 5) {
+                    clickCount = 0;
+                    window.location.href = 'regularize-attendance.html';
+                    return;
+                }
+
+                // Reset después de 3 segundos
+                clickTimer = setTimeout(() => {
+                    clickCount = 0;
+                }, 3000);
+            });
+        }    });
 })();

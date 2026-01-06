@@ -15,8 +15,21 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            padding: var(--spacing-lg);
+            min-height: 100dvh;
+            padding: calc(var(--spacing-lg) + env(safe-area-inset-top)) calc(var(--spacing-lg) + env(safe-area-inset-right)) calc(var(--spacing-lg) + env(safe-area-inset-bottom)) calc(var(--spacing-lg) + env(safe-area-inset-left));
             background: var(--bg-dark);
+        }
+
+        /* En esta pantalla forzamos que los modales cubran el viewport real,
+           independientemente del layout de la tarjeta. */
+        .modal {
+            inset: 0;
+            width: auto;
+            height: auto;
+            min-height: 100vh;
+            min-height: 100dvh;
+            z-index: 9999;
+            padding: calc(var(--spacing-md) + env(safe-area-inset-top)) calc(var(--spacing-md) + env(safe-area-inset-right)) calc(var(--spacing-md) + env(safe-area-inset-bottom)) calc(var(--spacing-md) + env(safe-area-inset-left));
         }
 
         .card {
@@ -26,6 +39,16 @@
             border-radius: var(--radius-xl);
             padding: var(--spacing-xl);
             box-shadow: var(--shadow-lg);
+        }
+
+        @media (max-height: 640px) {
+            body {
+                align-items: flex-start;
+            }
+
+            .card {
+                padding: var(--spacing-lg);
+            }
         }
 
         .header {
@@ -101,26 +124,98 @@
             gap: var(--spacing-md);
             margin-top: var(--spacing-lg);
         }
+
+        .code-modal-title {
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .code-modal-subtitle {
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .code-input-row {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-md);
+        }
+
+        .code-input-row .form-control {
+            flex: 1;
+        }
+
+        .code-toggle-btn {
+            white-space: nowrap;
+            padding: 0.75rem 0.9rem;
+        }
+
+        .code-keypad {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--spacing-sm);
+        }
+
+        .code-keypad .btn {
+            width: 100%;
+            padding: 0.85rem 0.75rem;
+            font-weight: 700;
+            font-size: 1.05rem;
+        }
+
+        .code-keypad .btn.keypad-action {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        @media (max-width: 480px) {
+            .modal-content.store-code-modal {
+                padding: var(--spacing-lg);
+            }
+
+            .code-keypad .btn {
+                padding: 0.75rem 0.6rem;
+                font-size: 1rem;
+            }
+
+            .code-toggle-btn {
+                padding: 0.75rem 0.75rem;
+            }
+        }
+
+        @media (max-height: 560px) {
+            .modal {
+                padding: var(--spacing-sm);
+            }
+
+            .modal.active {
+                align-items: flex-start;
+            }
+
+            .modal-content.store-code-modal {
+                max-height: 92vh;
+                max-height: 92dvh;
+                padding: var(--spacing-md);
+            }
+
+            .code-modal-subtitle {
+                margin-bottom: var(--spacing-md);
+            }
+
+            .code-keypad {
+                gap: var(--spacing-xs);
+            }
+
+            .code-keypad .btn {
+                padding: 0.7rem 0.6rem;
+                font-size: 0.98rem;
+            }
+        }
     </style>
 </head>
 
 <body>
     <div class="card">
         <div id="alert-container"></div>
-
-        <div id="punch-modal" class="modal">
-            <div class="modal-content" style="max-width: 520px;">
-                <h2 style="margin-bottom: var(--spacing-md);">Fichaje registrado</h2>
-                <div class="muted" id="punch-employee" style="margin-bottom: var(--spacing-sm);"></div>
-                <div style="display:flex; gap: var(--spacing-md); align-items:center; flex-wrap: wrap;">
-                    <span id="punch-type" class="badge badge-info">-</span>
-                    <span id="punch-datetime" class="muted">-</span>
-                </div>
-                <div class="muted" style="margin-top: var(--spacing-md);">
-                    Volviendo al portal en unos segundos...
-                </div>
-            </div>
-        </div>
 
         <div class="header">
             <h1>Fichaje por Tienda</h1>
@@ -150,6 +245,54 @@
             <div id="employees-grid" class="employees-grid"></div>
             <div class="actions">
                 <button class="btn btn-secondary" id="btn-logout">Salir</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="punch-modal" class="modal">
+        <div class="modal-content" style="max-width: 520px;">
+            <h2 style="margin-bottom: var(--spacing-md);">Fichaje registrado</h2>
+            <div class="muted" id="punch-employee" style="margin-bottom: var(--spacing-sm);"></div>
+            <div style="display:flex; gap: var(--spacing-md); align-items:center; flex-wrap: wrap;">
+                <span id="punch-type" class="badge badge-info">-</span>
+                <span id="punch-datetime" class="muted">-</span>
+            </div>
+            <div class="muted" style="margin-top: var(--spacing-md);">
+                Volviendo al portal en unos segundos...
+            </div>
+        </div>
+    </div>
+
+    <div id="code-modal" class="modal" aria-hidden="true">
+        <div class="modal-content store-code-modal" style="max-width: 520px;" role="dialog" aria-modal="true" aria-labelledby="code-modal-title" aria-describedby="code-modal-subtitle">
+            <button class="btn-close" type="button" id="code-modal-close" aria-label="Cerrar">&times;</button>
+            <h2 id="code-modal-title" class="code-modal-title">Introduce tu código</h2>
+            <div id="code-modal-subtitle" class="muted code-modal-subtitle">-</div>
+
+            <div class="code-input-row">
+                <input class="form-control" type="password" id="code-input" placeholder="Código" inputmode="numeric" autocomplete="one-time-code" />
+                <button class="btn btn-secondary code-toggle-btn" type="button" id="code-toggle-visibility" aria-pressed="false">Mostrar</button>
+            </div>
+
+            <div class="code-keypad" aria-label="Teclado numérico">
+                <button class="btn btn-secondary" type="button" data-key="1">1</button>
+                <button class="btn btn-secondary" type="button" data-key="2">2</button>
+                <button class="btn btn-secondary" type="button" data-key="3">3</button>
+                <button class="btn btn-secondary" type="button" data-key="4">4</button>
+                <button class="btn btn-secondary" type="button" data-key="5">5</button>
+                <button class="btn btn-secondary" type="button" data-key="6">6</button>
+                <button class="btn btn-secondary" type="button" data-key="7">7</button>
+                <button class="btn btn-secondary" type="button" data-key="8">8</button>
+                <button class="btn btn-secondary" type="button" data-key="9">9</button>
+
+                <button class="btn btn-secondary keypad-action" type="button" data-action="backspace">Borrar</button>
+                <button class="btn btn-secondary" type="button" data-key="0">0</button>
+                <button class="btn btn-secondary keypad-action" type="button" data-action="clear">Limpiar</button>
+            </div>
+
+            <div class="actions" style="margin-top: var(--spacing-lg);">
+                <button class="btn btn-secondary" type="button" id="code-cancel">Cancelar</button>
+                <button class="btn btn-primary" type="button" id="code-accept">Aceptar</button>
             </div>
         </div>
     </div>

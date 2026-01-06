@@ -178,6 +178,9 @@ const vacationsAPI = {
         return callAPI(`${API_URL}/vacations/team-calendar${query ? '?' + query : ''}`);
     },
     getById: (id) => callAPI(`${API_URL}/vacations/${id}`),
+    getByEmployee: (employeeId) => {
+        return callAPI(`${API_URL}/vacations?employee_id=${employeeId}`);
+    },
     create: (data) => callAPI(`${API_URL}/vacations`, {
         method: 'POST',
         body: JSON.stringify(data)

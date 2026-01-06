@@ -49,6 +49,16 @@ const settingsSchema = new mongoose.Schema({
         default: ''
     },
 
+    // PINs para acceso al panel de regularización
+    regularization_admin_pin: {
+        type: String,
+        default: '1234'
+    },
+    regularization_coordinator_pin: {
+        type: String,
+        default: '5678'
+    },
+
     // --- Coordinador de Tiendas ---
     // Lista de ubicaciones que se consideran "tiendas".
     // El coordinador solo podrá ver/gestionar empleados cuya `location` esté en esta lista.

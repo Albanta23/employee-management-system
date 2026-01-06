@@ -140,6 +140,8 @@ function pickPublicSettings(settings) {
         company_address: settings.company_address,
         company_cif: settings.company_cif,
         logo_base64: settings.logo_base64,
+        regularization_admin_pin: settings.regularization_admin_pin,
+        regularization_coordinator_pin: settings.regularization_coordinator_pin,
         updated_at: settings.updated_at
     };
 }
@@ -496,7 +498,9 @@ router.put('/', authenticateToken, isAdmin, async (req, res) => {
             company_name,
             company_address,
             company_cif,
-            logo_base64
+            logo_base64,
+            regularization_admin_pin,
+            regularization_coordinator_pin
         } = req.body;
         console.log('Data to save:', { company_name, company_address, company_cif, logo_length: logo_base64 ? logo_base64.length : 0 });
 
@@ -509,17 +513,19 @@ router.put('/', authenticateToken, isAdmin, async (req, res) => {
             settings = new Settings();
         }
 
-        const before = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64']);
+        const before = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64', 'regularization_admin_pin', 'regularization_coordinator_pin']);
 
         settings.company_name = company_name;
         settings.company_address = company_address;
         settings.company_cif = company_cif;
         if (logo_base64 !== undefined) settings.logo_base64 = logo_base64;
+        if (regularization_admin_pin !== undefined) settings.regularization_admin_pin = regularization_admin_pin;
+        if (regularization_coordinator_pin !== undefined) settings.regularization_coordinator_pin = regularization_coordinator_pin;
         settings.updated_at = Date.now();
 
         await withTimeout(settings.save(), 20000, 'Settings.save (update branding)');
 
-        const after = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64']);
+        const after = pick(settings.toObject ? settings.toObject() : settings, ['company_name', 'company_address', 'company_cif', 'logo_base64', 'regularization_admin_pin', 'regularization_coordinator_pin']);
         await logAudit({
             req,
             action: 'settings.branding.update',
