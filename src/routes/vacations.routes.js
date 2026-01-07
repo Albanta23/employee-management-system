@@ -77,6 +77,20 @@ function parseIsoDateOrNull(value) {
     return d;
 }
 
+function toUtcDateOnly(d) {
+    const date = new Date(d);
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function calendarDaysInclusive(startDate, endDate) {
+    if (!startDate || !endDate) return 0;
+    const startUtc = toUtcDateOnly(startDate);
+    const endUtc = toUtcDateOnly(endDate);
+    if (endUtc < startUtc) return 0;
+    const diffDays = Math.floor((endUtc - startUtc) / (1000 * 60 * 60 * 24));
+    return diffDays + 1;
+}
+
 function toDateOnlyString(d) {
     const date = new Date(d);
     const y = date.getUTCFullYear();
@@ -298,15 +312,27 @@ async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
 
     const yearSet = includePreviousYearForCarryover ? [year, prevYear] : [year];
 
-    const items = await Vacation.find({
-        employee_id: employeeId,
-        $or: [
-            // Preferencia: imputación por año contable (si existe)
-            { vacation_year: { $in: yearSet } },
-            // Compatibilidad: registros antiguos sin vacation_year (por solape de fechas)
-            { start_date: { $lte: end }, end_date: { $gte: queryStart } }
-        ]
-    }).lean();
+    const [items, deductibleAbsences] = await Promise.all([
+        Vacation.find({
+            employee_id: employeeId,
+            $or: [
+                // Preferencia: imputación por año contable (si existe)
+                { vacation_year: { $in: yearSet } },
+                // Compatibilidad: registros antiguos sin vacation_year (por solape de fechas)
+                { start_date: { $lte: end }, end_date: { $gte: queryStart } }
+            ]
+        }).lean(),
+        Absence.find({
+            employee_id: employeeId,
+            deduct_from_vacation: true,
+            start_date: { $lte: end },
+            $or: [
+                { end_date: { $gte: queryStart } },
+                { end_date: null },
+                { end_date: { $exists: false } }
+            ]
+        }).select('start_date end_date type status deduct_vacation_days').lean()
+    ]);
 
     const getYearTag = (v) => {
         const vy = Number(v && v.vacation_year);
@@ -341,8 +367,47 @@ async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
     const permRejected = sumDaysByStatus(permissions, 'rejected');
 
     const prevVacations = itemsPrevYear.filter(v => (v.type || 'vacation') === 'vacation');
+    const prevPermissions = itemsPrevYear.filter(v => (v.type || 'vacation') !== 'vacation');
     const prevVacationApproved = includePreviousYearForCarryover ? sumDaysByStatus(prevVacations, 'approved') : 0;
     const prevVacationPending = includePreviousYearForCarryover ? sumDaysByStatus(prevVacations, 'pending') : 0;
+    const prevPermApproved = includePreviousYearForCarryover ? sumDaysByStatus(prevPermissions, 'approved') : 0;
+    const prevPermPending = includePreviousYearForCarryover ? sumDaysByStatus(prevPermissions, 'pending') : 0;
+
+    // Ausencias que descuentan vacaciones (no presentarse), según justificación.
+    // Solo cuentan si están marcadas con deduct_from_vacation=true.
+    const today = new Date();
+    const prevEnd = new Date(`${prevYear}-12-31T23:59:59.999Z`);
+    let deductedAbsenceDaysCurrent = 0;
+    let deductedAbsenceDaysPrev = 0;
+
+    const calcDeductDaysForRange = (a, rangeStart, rangeEnd) => {
+        const rawStart = a && a.start_date ? new Date(a.start_date) : null;
+        if (!rawStart || Number.isNaN(rawStart.getTime())) return 0;
+
+        const rawEnd = (a && a.end_date) ? new Date(a.end_date) : rawStart;
+        if (Number.isNaN(rawEnd.getTime())) return 0;
+
+        const overlapStart = new Date(Math.max(rawStart.getTime(), rangeStart.getTime()));
+        const overlapEnd = new Date(Math.min(rawEnd.getTime(), rangeEnd.getTime()));
+        if (overlapEnd.getTime() < overlapStart.getTime()) return 0;
+
+        const override = Number(a && a.deduct_vacation_days);
+        // Si hay override, lo imputamos al año de inicio (caso típico: 1 día). Evita repartir overrides entre años.
+        if (Number.isFinite(override) && override >= 0) {
+            const startYear = rawStart.getUTCFullYear();
+            const rangeYear = rangeStart.getUTCFullYear();
+            return startYear === rangeYear ? override : 0;
+        }
+
+        return calendarDaysInclusive(overlapStart, overlapEnd);
+    };
+
+    for (const a of (deductibleAbsences || [])) {
+        deductedAbsenceDaysCurrent += calcDeductDaysForRange(a, start, end);
+        if (includePreviousYearForCarryover) {
+            deductedAbsenceDaysPrev += calcDeductDaysForRange(a, prevStart, prevEnd);
+        }
+    }
 
     return {
         year,
@@ -364,11 +429,21 @@ async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
             pending_days: permPending,
             rejected_days: permRejected
         },
+        absences: {
+            deducted_days: deductedAbsenceDaysCurrent
+        },
         previous_year: includePreviousYearForCarryover ? {
             year: prevYear,
             vacation: {
                 approved_days: prevVacationApproved,
                 pending_days: prevVacationPending
+            },
+            permissions: {
+                approved_days: prevPermApproved,
+                pending_days: prevPermPending
+            },
+            absences: {
+                deducted_days: deductedAbsenceDaysPrev
             }
         } : null
     };
@@ -409,9 +484,16 @@ router.get('/balance', async (req, res) => {
 
         if (policy.carryover_enabled && policy.carryover_max_days > 0) {
             const prevAllowanceDays = computeProratedAnnualAllowanceDays(employee, year - 1, policy);
-            const prevApproved = balance.previous_year && balance.previous_year.vacation
+            const prevApprovedVac = balance.previous_year && balance.previous_year.vacation
                 ? Number(balance.previous_year.vacation.approved_days) || 0
                 : 0;
+            const prevApprovedPerm = balance.previous_year && balance.previous_year.permissions
+                ? Number(balance.previous_year.permissions.approved_days) || 0
+                : 0;
+            const prevAbsenceDeducted = balance.previous_year && balance.previous_year.absences
+                ? Number(balance.previous_year.absences.deducted_days) || 0
+                : 0;
+            const prevApproved = prevApprovedVac + prevApprovedPerm + prevAbsenceDeducted;
 
             previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
             carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
@@ -429,8 +511,15 @@ router.get('/balance', async (req, res) => {
         balance.vacation.carryover_days = carryoverDays;
         balance.vacation.previous_year_unused_days = previousYearUnusedDays;
         balance.vacation.allowance_days = allowanceDays;
-        balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - balance.vacation.approved_days);
-        balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - balance.vacation.approved_days - balance.vacation.pending_days);
+        const absDeducted = balance.absences ? (Number(balance.absences.deducted_days) || 0) : 0;
+        const approvedConsumed = (Number(balance.vacation.approved_days) || 0) + (Number(balance.permissions.approved_days) || 0) + absDeducted;
+        const pendingConsumed = (Number(balance.vacation.approved_days) || 0)
+            + (Number(balance.vacation.pending_days) || 0)
+            + (Number(balance.permissions.approved_days) || 0)
+            + (Number(balance.permissions.pending_days) || 0)
+            + absDeducted;
+        balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - approvedConsumed);
+        balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - pendingConsumed);
 
         res.json(balance);
     } catch (error) {
@@ -513,9 +602,16 @@ router.get('/balances', async (req, res) => {
             let previousYearUnusedDays = 0;
             if (policy.carryover_enabled && policy.carryover_max_days > 0) {
                 const prevAllowanceDays = computeProratedAnnualAllowanceDays(e, year - 1, policy);
-                const prevApproved = balance.previous_year && balance.previous_year.vacation
+                const prevApprovedVac = balance.previous_year && balance.previous_year.vacation
                     ? Number(balance.previous_year.vacation.approved_days) || 0
                     : 0;
+                const prevApprovedPerm = balance.previous_year && balance.previous_year.permissions
+                    ? Number(balance.previous_year.permissions.approved_days) || 0
+                    : 0;
+                const prevAbsenceDeducted = balance.previous_year && balance.previous_year.absences
+                    ? Number(balance.previous_year.absences.deducted_days) || 0
+                    : 0;
+                const prevApproved = prevApprovedVac + prevApprovedPerm + prevAbsenceDeducted;
                 previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
                 carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
             }
@@ -532,8 +628,15 @@ router.get('/balances', async (req, res) => {
             balance.vacation.carryover_days = carryoverDays;
             balance.vacation.previous_year_unused_days = previousYearUnusedDays;
             balance.vacation.allowance_days = allowanceDays;
-            balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - balance.vacation.approved_days);
-            balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - balance.vacation.approved_days - balance.vacation.pending_days);
+            const absDeducted = balance.absences ? (Number(balance.absences.deducted_days) || 0) : 0;
+            const approvedConsumed = (Number(balance.vacation.approved_days) || 0) + (Number(balance.permissions.approved_days) || 0) + absDeducted;
+            const pendingConsumed = (Number(balance.vacation.approved_days) || 0)
+                + (Number(balance.vacation.pending_days) || 0)
+                + (Number(balance.permissions.approved_days) || 0)
+                + (Number(balance.permissions.pending_days) || 0)
+                + absDeducted;
+            balance.vacation.remaining_after_approved = Math.max(0, allowanceDays - approvedConsumed);
+            balance.vacation.remaining_after_pending = Math.max(0, allowanceDays - pendingConsumed);
 
             balance.employee = {
                 id: String(e._id),

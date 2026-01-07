@@ -120,6 +120,18 @@
                         <option value="other">Otra</option>
                     </select>
                 </div>
+
+                <div class="form-group" id="deductVacationGroup" style="display: none;">
+                    <label class="form-label">
+                        <input type="checkbox" id="deduct_from_vacation">
+                        Ausencia no justificada (descontar vacaciones)
+                    </label>
+                    <div id="deductDaysRow" style="display: none; margin-top: 0.5rem;">
+                        <label class="form-label">Días a descontar</label>
+                        <input type="number" id="deduct_vacation_days" class="form-control" min="0" step="0.5" value="1">
+                        <small style="color: var(--text-muted);">Se descuenta del saldo de vacaciones disponible.</small>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label class="form-label">
                         <input type="checkbox" id="medical_certificate">
@@ -272,15 +284,57 @@
             if (e.target.id === 'absenceModal') closeModal();
         });
 
+        function syncDeductVacationUI() {
+            const type = document.getElementById('type').value;
+            const group = document.getElementById('deductVacationGroup');
+            const checkbox = document.getElementById('deduct_from_vacation');
+            const daysRow = document.getElementById('deductDaysRow');
+            const daysInput = document.getElementById('deduct_vacation_days');
+
+            const isOther = type === 'other';
+            group.style.display = isOther ? 'block' : 'none';
+
+            if (!isOther) {
+                checkbox.checked = false;
+                daysRow.style.display = 'none';
+                return;
+            }
+
+            daysRow.style.display = checkbox.checked ? 'block' : 'none';
+            if (checkbox.checked && (!daysInput.value || Number(daysInput.value) <= 0)) {
+                daysInput.value = 1;
+            }
+
+            // Si es una ausencia de 1 día, autocompletar end_date si estaba vacío
+            const start = document.getElementById('start_date').value;
+            const end = document.getElementById('end_date').value;
+            if (checkbox.checked && start && !end) {
+                document.getElementById('end_date').value = start;
+            }
+        }
+
+        document.getElementById('type').addEventListener('change', syncDeductVacationUI);
+        document.getElementById('deduct_from_vacation').addEventListener('change', syncDeductVacationUI);
+        document.getElementById('start_date').addEventListener('change', syncDeductVacationUI);
+
         document.getElementById('absenceForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            const deductFromVacation = document.getElementById('deduct_from_vacation')?.checked;
+            const deductDaysRaw = document.getElementById('deduct_vacation_days')?.value;
+            const deductDays = deductDaysRaw === '' || deductDaysRaw === null || deductDaysRaw === undefined
+                ? undefined
+                : Number(deductDaysRaw);
+
             const data = {
                 employee_id: document.getElementById('employee_id').value,
                 start_date: document.getElementById('start_date').value,
                 end_date: document.getElementById('end_date').value || null,
                 type: document.getElementById('type').value,
                 medical_certificate: document.getElementById('medical_certificate').checked,
-                notes: document.getElementById('notes').value
+                notes: document.getElementById('notes').value,
+                deduct_from_vacation: !!deductFromVacation,
+                deduct_vacation_days: (deductFromVacation ? (Number.isFinite(deductDays) ? deductDays : 1) : undefined)
             };
             const result = await absencesAPI.create(data);
             if (result) {

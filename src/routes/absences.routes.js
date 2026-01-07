@@ -37,6 +37,32 @@ function parseIsoDateOrNull(value) {
     return d;
 }
 
+function normalizeDeductVacationFlags({ type, deduct_from_vacation, deduct_vacation_days }) {
+    const normalizedType = String(type || '').trim();
+    const wantsDeduct = !!deduct_from_vacation;
+
+    // Solo permitimos descuento para ausencias tipo "other" (no presentarse / incidencia no médica).
+    if (wantsDeduct && normalizedType !== 'other') {
+        return { error: 'El descuento de vacaciones solo es válido para ausencias tipo "Otra" (no médicas)' };
+    }
+
+    let daysOverride = undefined;
+    if (deduct_vacation_days !== undefined && deduct_vacation_days !== null && String(deduct_vacation_days) !== '') {
+        const n = Number(deduct_vacation_days);
+        if (!Number.isFinite(n) || n < 0) {
+            return { error: 'deduct_vacation_days debe ser un número >= 0' };
+        }
+        daysOverride = n;
+    }
+
+    return {
+        value: {
+            deduct_from_vacation: wantsDeduct,
+            deduct_vacation_days: daysOverride
+        }
+    };
+}
+
 async function hasOverlapForAbsence({ employeeId, employeeLocation, startDate, endDate, excludeAbsenceId = null }) {
     const effectiveEnd = endDate || new Date('9999-12-31T00:00:00.000Z');
 
@@ -228,7 +254,7 @@ router.post('/', async (req, res) => {
         const hasAccess = await requireFeatureAccess(req, res, 'absences');
         if (!hasAccess) return;
 
-        const { employee_id, start_date, end_date, type, reason, medical_certificate, notes } = req.body;
+        const { employee_id, start_date, end_date, type, reason, medical_certificate, notes, deduct_from_vacation, deduct_vacation_days } = req.body;
 
         if (!employee_id || !start_date || !type) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
@@ -251,6 +277,14 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
         }
 
+        const ded = normalizeDeductVacationFlags({ type, deduct_from_vacation, deduct_vacation_days });
+        if (ded.error) {
+            return res.status(400).json({ error: ded.error });
+        }
+
+        // Si descuenta vacaciones y no hay end_date, asumimos ausencia de 1 día.
+        const effectiveEndDate = (ded.value.deduct_from_vacation && !endDate) ? startDate : endDate;
+
         const overlaps = await hasOverlapForAbsence({ employeeId: employee_id, employeeLocation: employee.location, startDate, endDate });
         if (overlaps.absenceOverlap) {
             return res.status(409).json({ error: 'El rango se solapa con otra baja/ausencia existente' });
@@ -262,12 +296,14 @@ router.post('/', async (req, res) => {
         const absence = new Absence({
             employee_id,
             start_date: startDate,
-            end_date: endDate,
+            end_date: effectiveEndDate,
             type,
             reason,
             medical_certificate,
             notes,
-            status: 'active'
+            status: 'active',
+            deduct_from_vacation: ded.value.deduct_from_vacation,
+            deduct_vacation_days: ded.value.deduct_vacation_days
         });
 
         await absence.save();
@@ -280,6 +316,94 @@ router.post('/', async (req, res) => {
     } catch (error) {
         console.error('Error al registrar baja:', error);
         res.status(500).json({ error: 'Error al registrar baja' });
+    }
+});
+
+// Actualizar una baja/ausencia (compatibilidad con UI y para marcar descuento de vacaciones)
+router.put('/:id', async (req, res) => {
+    try {
+        const hasAccess = await requireFeatureAccess(req, res, 'absences');
+        if (!hasAccess) return;
+
+        const existing = await Absence.findById(req.params.id);
+        if (!existing) return res.status(404).json({ error: 'Baja no encontrada' });
+
+        const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
+        if (!ok) return;
+
+        const {
+            start_date,
+            end_date,
+            type,
+            reason,
+            notes,
+            medical_certificate,
+            status,
+            deduct_from_vacation,
+            deduct_vacation_days
+        } = req.body || {};
+
+        // Caso típico: cerrar desde la UI antigua
+        if (status && String(status) === 'closed') {
+            const newEnd = end_date ? parseIsoDateOrNull(end_date) : new Date();
+            const closed = await Absence.findByIdAndUpdate(req.params.id, {
+                status: 'closed',
+                end_date: newEnd
+            }, { new: true });
+            return res.json({ message: 'Baja finalizada correctamente', absence: closed });
+        }
+
+        const update = {};
+
+        if (start_date !== undefined) {
+            const d = parseIsoDateOrNull(start_date);
+            if (!d) return res.status(400).json({ error: 'Fecha inicio inválida' });
+            update.start_date = d;
+        }
+        if (end_date !== undefined) {
+            const d = end_date ? parseIsoDateOrNull(end_date) : null;
+            if (end_date && !d) return res.status(400).json({ error: 'Fecha fin inválida' });
+            update.end_date = d;
+        }
+        const effectiveType = (type !== undefined) ? String(type) : String(existing.type);
+        if (type !== undefined) update.type = effectiveType;
+        if (reason !== undefined) update.reason = reason;
+        if (notes !== undefined) update.notes = notes;
+        if (medical_certificate !== undefined) update.medical_certificate = !!medical_certificate;
+
+        // Validar y aplicar flags de descuento
+        const ded = normalizeDeductVacationFlags({
+            type: effectiveType,
+            deduct_from_vacation: (deduct_from_vacation !== undefined ? deduct_from_vacation : existing.deduct_from_vacation),
+            deduct_vacation_days: (deduct_vacation_days !== undefined ? deduct_vacation_days : existing.deduct_vacation_days)
+        });
+        if (ded.error) {
+            return res.status(400).json({ error: ded.error });
+        }
+
+        if (deduct_from_vacation !== undefined) update.deduct_from_vacation = ded.value.deduct_from_vacation;
+        if (deduct_vacation_days !== undefined) update.deduct_vacation_days = ded.value.deduct_vacation_days;
+
+        // Si se activa el descuento y no hay end_date, tratamos como 1 día.
+        const willDeduct = (update.deduct_from_vacation !== undefined) ? update.deduct_from_vacation : existing.deduct_from_vacation;
+        const startForDeduct = update.start_date || existing.start_date;
+        const endForDeduct = (update.end_date !== undefined) ? update.end_date : existing.end_date;
+        if (willDeduct && !endForDeduct) {
+            update.end_date = startForDeduct;
+        }
+
+        // Validación de rango
+        const finalStart = update.start_date || existing.start_date;
+        const finalEnd = (update.end_date !== undefined) ? update.end_date : existing.end_date;
+        if (finalEnd && finalEnd.getTime() < finalStart.getTime()) {
+            return res.status(400).json({ error: 'La fecha fin no puede ser anterior a la fecha inicio' });
+        }
+
+        const updated = await Absence.findByIdAndUpdate(req.params.id, update, { new: true });
+        return res.json({ message: 'Registro actualizado correctamente', absence: updated });
+    } catch (error) {
+        console.error('Error al actualizar baja:', error);
+        return res.status(500).json({ error: 'Error al actualizar baja' });
     }
 });
 
