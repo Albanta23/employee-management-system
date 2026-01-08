@@ -9,6 +9,9 @@ const EmployeeSchema = new mongoose.Schema({
     location: { type: String, required: true },
     convention: { type: String },
     annual_vacation_days: { type: Number, default: 30 },
+    // Días pendientes de disfrutar de otros años (carryover manual).
+    // Se descuentan primero (FIFO) al aprobar/solicitar vacaciones.
+    vacation_carryover_days: { type: Number, default: 0 },
     status: { type: String, enum: ['active', 'inactive', 'on_leave'], default: 'active' },
     hire_date: { type: Date },
     termination_date: { type: Date },

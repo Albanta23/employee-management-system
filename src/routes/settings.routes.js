@@ -7,6 +7,7 @@ const Employee = require('../models/Employee');
 const bcrypt = require('bcrypt');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { logAudit, pick, shallowDiff } = require('../utils/audit');
+const { runVacationRollover } = require('../utils/vacationRollover');
 
 function buildDefaultOverlapRules() {
     return {
@@ -485,6 +486,50 @@ router.put('/vacation-policy', authenticateToken, async (req, res) => {
             return res.status(503).json({ error: 'La base de datos no responde (timeout)' });
         }
         return res.status(500).json({ error: 'Error al actualizar política de vacaciones' });
+    }
+});
+
+// Ejecutar rollover de vacaciones manualmente (ADMIN)
+// - En Vercel/serverless no hay cron persistente, así que se lanza bajo demanda.
+router.post('/vacation-rollover', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const now = new Date();
+        const defaultYear = now.getFullYear() - 1;
+
+        const body = req.body || {};
+        const targetYear = Number.isFinite(Number(body.year)) ? Number(body.year) : defaultYear;
+        const dryRun = String(body.dryRun || 'false').toLowerCase() === 'true' || body.dryRun === true;
+        const force = String(body.force || 'false').toLowerCase() === 'true' || body.force === true;
+
+        const actor = {
+            user_id: req.user && (req.user.id || req.user._id) ? String(req.user.id || req.user._id) : null,
+            username: req.user && req.user.username ? String(req.user.username) : 'admin',
+            role: req.user && req.user.role ? String(req.user.role) : 'admin'
+        };
+
+        const result = await runVacationRollover({ targetYear, dryRun, force, actor });
+
+        await logAudit({
+            req,
+            action: 'settings.vacation_rollover.run',
+            entityType: 'Settings',
+            entityId: 'singleton',
+            employeeId: '',
+            employeeLocation: '',
+            before: null,
+            after: null,
+            meta: {
+                year: targetYear,
+                dryRun,
+                force,
+                result
+            }
+        });
+
+        return res.json(result);
+    } catch (error) {
+        console.error('Error al ejecutar rollover de vacaciones:', error);
+        return res.status(500).json({ error: 'Error al ejecutar el rollover de vacaciones' });
     }
 });
 

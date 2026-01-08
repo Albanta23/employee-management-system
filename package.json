@@ -24,7 +24,9 @@
     "android:apk": "npx cap sync android && cd android && ./gradlew assembleDebug",
     "android:aab": "npx cap sync android && cd android && ./gradlew bundleRelease"
     ,
-    "generate:portal-empleado-pdf": "node scripts/generate-portal-empleado-pdf.js"
+    "generate:portal-empleado-pdf": "node scripts/generate-portal-empleado-pdf.js",
+    "vacation:rollover": "node scripts/rollover-vacation-carryover.js",
+    "vacation:rollover:schedule": "node scripts/vacation-rollover-scheduler.js"
   },
   "keywords": [
     "employee",

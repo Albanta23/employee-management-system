@@ -64,10 +64,29 @@ function deriveVacationYear({ explicitYear, startDate, reason }) {
     return new Date().getUTCFullYear();
 }
 
-function sumDaysByStatus(items, status) {
+function sumDaysByStatus(items, status, getDays = (v) => (Number(v && v.days) || 0)) {
     return items
         .filter(v => (v.status || 'pending') === status)
-        .reduce((acc, v) => acc + (Number(v.days) || 0), 0);
+        .reduce((acc, v) => acc + (Number(getDays(v)) || 0), 0);
+}
+
+async function reserveEmployeeCarryoverDays(employeeId, daysToReserve) {
+    const n = Number(daysToReserve) || 0;
+    if (n <= 0) return { ok: true };
+    const updated = await Employee.findOneAndUpdate(
+        { _id: employeeId, vacation_carryover_days: { $gte: n } },
+        { $inc: { vacation_carryover_days: -n } },
+        { new: true }
+    ).lean();
+    if (!updated) return { ok: false, error: 'No hay suficientes días pendientes de otros años para reservar' };
+    return { ok: true };
+}
+
+async function releaseEmployeeCarryoverDays(employeeId, daysToRelease) {
+    const n = Number(daysToRelease) || 0;
+    if (n <= 0) return { ok: true };
+    await Employee.findByIdAndUpdate(employeeId, { $inc: { vacation_carryover_days: n } }, { new: false }).lean();
+    return { ok: true };
 }
 
 function parseIsoDateOrNull(value) {
@@ -358,13 +377,22 @@ async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
     const vacations = itemsCurrentYear.filter(v => (v.type || 'vacation') === 'vacation');
     const permissions = itemsCurrentYear.filter(v => (v.type || 'vacation') !== 'vacation');
 
-    const vacationApproved = sumDaysByStatus(vacations, 'approved');
-    const vacationPending = sumDaysByStatus(vacations, 'pending');
-    const vacationRejected = sumDaysByStatus(vacations, 'rejected');
+    // Para balance anual (año vigente), solo contamos lo que consume del año vigente.
+    // Los días consumidos de carryover ya quedan reflejados en Employee.vacation_carryover_days.
+    const getCurrentYearConsumedDays = (v) => {
+        const a = v && v.allocation ? v.allocation : null;
+        const current = a && Number.isFinite(Number(a.current_year_days)) ? Number(a.current_year_days) : null;
+        if (current !== null) return Math.max(0, current);
+        return Number(v && v.days) || 0;
+    };
 
-    const permApproved = sumDaysByStatus(permissions, 'approved');
-    const permPending = sumDaysByStatus(permissions, 'pending');
-    const permRejected = sumDaysByStatus(permissions, 'rejected');
+    const vacationApproved = sumDaysByStatus(vacations, 'approved', getCurrentYearConsumedDays);
+    const vacationPending = sumDaysByStatus(vacations, 'pending', getCurrentYearConsumedDays);
+    const vacationRejected = sumDaysByStatus(vacations, 'rejected', getCurrentYearConsumedDays);
+
+    const permApproved = sumDaysByStatus(permissions, 'approved', getCurrentYearConsumedDays);
+    const permPending = sumDaysByStatus(permissions, 'pending', getCurrentYearConsumedDays);
+    const permRejected = sumDaysByStatus(permissions, 'rejected', getCurrentYearConsumedDays);
 
     const prevVacations = itemsPrevYear.filter(v => (v.type || 'vacation') === 'vacation');
     const prevPermissions = itemsPrevYear.filter(v => (v.type || 'vacation') !== 'vacation');
@@ -474,29 +502,28 @@ router.get('/balance', async (req, res) => {
         const settings = await getSettingsForAccess();
         const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
 
+        // El carryover ahora es manual por empleado (Mongo): Employee.vacation_carryover_days
+        // Para mantener compatibilidad, seguimos devolviendo policy y previous_year_unused_days (informativo).
         const balance = await buildTimeOffBalanceForEmployee(employee_id, year, {
-            includePreviousYearForCarryover: policy.carryover_enabled && policy.carryover_max_days > 0
+            includePreviousYearForCarryover: false
         });
 
         const baseAllowanceDays = computeProratedAnnualAllowanceDays(employee, year, policy);
-        let carryoverDays = 0;
+        const carryoverDays = Math.max(0, Number(employee && employee.vacation_carryover_days) || 0);
+
+        // Informativo: días no usados del año anterior según consumo imputado (sin tope/carryover-policy).
         let previousYearUnusedDays = 0;
-
-        if (policy.carryover_enabled && policy.carryover_max_days > 0) {
-            const prevAllowanceDays = computeProratedAnnualAllowanceDays(employee, year - 1, policy);
-            const prevApprovedVac = balance.previous_year && balance.previous_year.vacation
-                ? Number(balance.previous_year.vacation.approved_days) || 0
-                : 0;
-            const prevApprovedPerm = balance.previous_year && balance.previous_year.permissions
-                ? Number(balance.previous_year.permissions.approved_days) || 0
-                : 0;
-            const prevAbsenceDeducted = balance.previous_year && balance.previous_year.absences
-                ? Number(balance.previous_year.absences.deducted_days) || 0
-                : 0;
-            const prevApproved = prevApprovedVac + prevApprovedPerm + prevAbsenceDeducted;
-
+        try {
+            const prevYear = year - 1;
+            const prevBalance = await buildTimeOffBalanceForEmployee(employee_id, prevYear, { includePreviousYearForCarryover: false });
+            const prevAllowanceDays = computeProratedAnnualAllowanceDays(employee, prevYear, policy);
+            const prevAbsDeducted = prevBalance && prevBalance.absences ? (Number(prevBalance.absences.deducted_days) || 0) : 0;
+            const prevApproved = (Number(prevBalance.vacation.approved_days) || 0)
+                + (Number(prevBalance.permissions.approved_days) || 0)
+                + prevAbsDeducted;
             previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
-            carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
+        } catch (e) {
+            // no-op: mantenemos 0 si falla
         }
 
         const allowanceDays = baseAllowanceDays + carryoverDays;
@@ -583,7 +610,7 @@ router.get('/balances', async (req, res) => {
         }
 
         const employees = await Employee.find(employeesQuery)
-            .select('_id annual_vacation_days full_name dni position location hire_date termination_date')
+            .select('_id annual_vacation_days vacation_carryover_days full_name dni position location hire_date termination_date')
             .lean();
 
         const settings = await getSettingsForAccess();
@@ -594,26 +621,24 @@ router.get('/balances', async (req, res) => {
             const employeeId = e._id;
 
             const balance = await buildTimeOffBalanceForEmployee(employeeId, year, {
-                includePreviousYearForCarryover: policy.carryover_enabled && policy.carryover_max_days > 0
+                includePreviousYearForCarryover: false
             });
 
             const baseAllowanceDays = computeProratedAnnualAllowanceDays(e, year, policy);
-            let carryoverDays = 0;
+            const carryoverDays = Math.max(0, Number(e && e.vacation_carryover_days) || 0);
+
             let previousYearUnusedDays = 0;
-            if (policy.carryover_enabled && policy.carryover_max_days > 0) {
-                const prevAllowanceDays = computeProratedAnnualAllowanceDays(e, year - 1, policy);
-                const prevApprovedVac = balance.previous_year && balance.previous_year.vacation
-                    ? Number(balance.previous_year.vacation.approved_days) || 0
-                    : 0;
-                const prevApprovedPerm = balance.previous_year && balance.previous_year.permissions
-                    ? Number(balance.previous_year.permissions.approved_days) || 0
-                    : 0;
-                const prevAbsenceDeducted = balance.previous_year && balance.previous_year.absences
-                    ? Number(balance.previous_year.absences.deducted_days) || 0
-                    : 0;
-                const prevApproved = prevApprovedVac + prevApprovedPerm + prevAbsenceDeducted;
+            try {
+                const prevYear = year - 1;
+                const prevBalance = await buildTimeOffBalanceForEmployee(employeeId, prevYear, { includePreviousYearForCarryover: false });
+                const prevAllowanceDays = computeProratedAnnualAllowanceDays(e, prevYear, policy);
+                const prevAbsDeducted = prevBalance && prevBalance.absences ? (Number(prevBalance.absences.deducted_days) || 0) : 0;
+                const prevApproved = (Number(prevBalance.vacation.approved_days) || 0)
+                    + (Number(prevBalance.permissions.approved_days) || 0)
+                    + prevAbsDeducted;
                 previousYearUnusedDays = Math.max(0, prevAllowanceDays - prevApproved);
-                carryoverDays = Math.min(previousYearUnusedDays, Number(policy.carryover_max_days) || 0);
+            } catch (e2) {
+                // no-op
             }
 
             const allowanceDays = baseAllowanceDays + carryoverDays;
@@ -939,18 +964,59 @@ router.post('/', async (req, res) => {
             reason
         });
 
+        // FIFO: primero se consumen días pendientes de otros años (carryover), luego del año en vigor.
+        // Para validar disponibilidad del año vigente, usamos el balance actual (solo consume current_year_days).
+        const settings = await getSettingsForAccess();
+        const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
+
+        const carryoverAvailable = Math.max(0, Number(employee.vacation_carryover_days) || 0);
+        const yearBaseAllowance = computeProratedAnnualAllowanceDays(employee, computedVacationYear, policy);
+        const yearBalance = await buildTimeOffBalanceForEmployee(employee_id, computedVacationYear, { includePreviousYearForCarryover: false });
+        const absDeducted = yearBalance && yearBalance.absences ? (Number(yearBalance.absences.deducted_days) || 0) : 0;
+        const pendingConsumed = (Number(yearBalance.vacation.approved_days) || 0)
+            + (Number(yearBalance.vacation.pending_days) || 0)
+            + (Number(yearBalance.permissions.approved_days) || 0)
+            + (Number(yearBalance.permissions.pending_days) || 0)
+            + absDeducted;
+        const remainingCurrentYearAfterPending = Math.max(0, yearBaseAllowance - pendingConsumed);
+        const totalAvailable = carryoverAvailable + remainingCurrentYearAfterPending;
+        if (Number(days) > totalAvailable) {
+            return res.status(409).json({
+                error: `No hay saldo suficiente. Disponibles: ${totalAvailable} (Años anteriores: ${carryoverAvailable}, Año ${computedVacationYear}: ${remainingCurrentYearAfterPending})`
+            });
+        }
+
+        const carryoverToUse = Math.min(carryoverAvailable, Number(days) || 0);
+        const currentYearToUse = Math.max(0, (Number(days) || 0) - carryoverToUse);
+
+        // Reservar carryover al crear la solicitud (queda trazado y evita sobre-asignación).
+        const reserve = await reserveEmployeeCarryoverDays(employee_id, carryoverToUse);
+        if (!reserve.ok) {
+            return res.status(409).json({ error: reserve.error || 'No se pudo reservar carryover' });
+        }
+
         const vacation = new Vacation({
             employee_id,
             vacation_year: computedVacationYear,
             start_date: startDate,
             end_date: endDate,
             days,
+            allocation: {
+                carryover_days: carryoverToUse,
+                current_year_days: currentYearToUse
+            },
             type,
             reason,
             status: 'pending'
         });
 
-        await vacation.save();
+        try {
+            await vacation.save();
+        } catch (e) {
+            // Rollback de reserva carryover si falló el guardado
+            await releaseEmployeeCarryoverDays(employee_id, carryoverToUse);
+            throw e;
+        }
 
         await logAudit({
             req,
@@ -960,7 +1026,7 @@ router.post('/', async (req, res) => {
             employeeId: String(employee_id),
             employeeLocation: String(employee.location || ''),
             before: null,
-            after: pick(vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason']),
+            after: pick(vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'allocation', 'reason']),
             meta: { source: isEmployeeUser(req.user) ? 'employee' : 'admin' }
         });
 
@@ -984,7 +1050,7 @@ router.put('/:id', async (req, res) => {
         const employeeForAudit = await Employee.findById(existing.employee_id).select('location').lean();
         const employeeLocationForAudit = employeeForAudit && employeeForAudit.location ? String(employeeForAudit.location) : '';
 
-        const beforeSnapshot = pick(existing.toObject(), ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
+        const beforeSnapshot = pick(existing.toObject(), ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'allocation', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
 
         if (isEmployeeUser(req.user)) {
             if (!ensureSelfEmployee(req, res, existing.employee_id)) return;
@@ -997,6 +1063,10 @@ router.put('/:id', async (req, res) => {
                 if (existing.status !== 'pending') {
                     return res.status(403).json({ error: 'Solo puedes cancelar solicitudes pendientes' });
                 }
+
+                // Liberar carryover reservado
+                const reservedCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                await releaseEmployeeCarryoverDays(existing.employee_id, reservedCarry);
 
                 update.status = 'cancelled';
                 update.cancelled_by = req.user.id;
@@ -1013,7 +1083,7 @@ router.put('/:id', async (req, res) => {
                     employeeId: String(existing.employee_id),
                     employeeLocation: employeeLocationForAudit,
                     before: beforeSnapshot,
-                    after: pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'status', 'start_date', 'end_date', 'days', 'reason', 'cancellation_reason']),
+                    after: pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'status', 'start_date', 'end_date', 'days', 'allocation', 'reason', 'cancellation_reason']),
                     meta: { by_role: req.user && req.user.role ? req.user.role : 'employee' }
                 });
 
@@ -1065,6 +1135,67 @@ router.put('/:id', async (req, res) => {
                     });
                 }
             }
+
+            // Recalcular asignación FIFO si sigue pendiente (editar afecta reserva)
+            if (existing.status === 'pending') {
+                const oldCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                // Devolver reserva anterior antes de recalcular
+                await releaseEmployeeCarryoverDays(existing.employee_id, oldCarry);
+
+                const employee = await Employee.findById(existing.employee_id).select('vacation_carryover_days annual_vacation_days hire_date termination_date location').lean();
+                if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+                const effectiveStart = parseIsoDateOrNull(update.start_date || existing.start_date);
+                const effectiveEnd = parseIsoDateOrNull(update.end_date || existing.end_date);
+                const computedYear = deriveVacationYear({
+                    explicitYear: (update.vacation_year !== undefined ? update.vacation_year : existing.vacation_year),
+                    startDate: effectiveStart,
+                    reason: (update.reason !== undefined ? update.reason : existing.reason)
+                });
+
+                const settings = await getSettingsForAccess();
+                const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
+                const carryoverAvailable = Math.max(0, Number(employee.vacation_carryover_days) || 0);
+                const yearBaseAllowance = computeProratedAnnualAllowanceDays(employee, computedYear, policy);
+                const yearBalance = await buildTimeOffBalanceForEmployee(existing.employee_id, computedYear, { includePreviousYearForCarryover: false });
+                const absDeducted = yearBalance && yearBalance.absences ? (Number(yearBalance.absences.deducted_days) || 0) : 0;
+
+                // OJO: yearBalance incluye esta misma solicitud con la asignación previa (que ya hemos devuelto).
+                // Para evitar doble contabilidad, restamos su impacto previo (current_year_days).
+                const prevCurrent = existing.allocation ? (Number(existing.allocation.current_year_days) || 0) : (Number(existing.days) || 0);
+                const pendingConsumed = (Number(yearBalance.vacation.approved_days) || 0)
+                    + (Number(yearBalance.vacation.pending_days) || 0)
+                    + (Number(yearBalance.permissions.approved_days) || 0)
+                    + (Number(yearBalance.permissions.pending_days) || 0)
+                    + absDeducted
+                    - prevCurrent;
+                const remainingCurrentYearAfterPending = Math.max(0, yearBaseAllowance - pendingConsumed);
+
+                const newTotalDays = Number(update.days !== undefined ? update.days : existing.days) || 0;
+                const totalAvailable = carryoverAvailable + remainingCurrentYearAfterPending;
+                if (newTotalDays > totalAvailable) {
+                    // Volver a reservar lo anterior para no dejar el carryover inflado
+                    await reserveEmployeeCarryoverDays(existing.employee_id, oldCarry);
+                    return res.status(409).json({
+                        error: `No hay saldo suficiente tras el cambio. Disponibles: ${totalAvailable} (Años anteriores: ${carryoverAvailable}, Año ${computedYear}: ${remainingCurrentYearAfterPending})`
+                    });
+                }
+
+                const carryoverToUse = Math.min(carryoverAvailable, newTotalDays);
+                const currentYearToUse = Math.max(0, newTotalDays - carryoverToUse);
+
+                const reserve = await reserveEmployeeCarryoverDays(existing.employee_id, carryoverToUse);
+                if (!reserve.ok) {
+                    // Volver a reservar lo anterior
+                    await reserveEmployeeCarryoverDays(existing.employee_id, oldCarry);
+                    return res.status(409).json({ error: reserve.error || 'No se pudo reservar carryover' });
+                }
+
+                update.allocation = {
+                    carryover_days: carryoverToUse,
+                    current_year_days: currentYearToUse
+                };
+            }
         } else {
             // Si se envía status, es una decisión (aprobación/rechazo/cancelación/revocación)
             if (status) {
@@ -1082,20 +1213,82 @@ router.put('/:id', async (req, res) => {
                     update.rejection_reason = rr;
                     update.rejected_by = req.user.id;
                     update.rejected_date = new Date();
+
+                    // Rechazo de una pendiente: liberar carryover reservado
+                    if (existing.status === 'pending') {
+                        const reservedCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                        await releaseEmployeeCarryoverDays(existing.employee_id, reservedCarry);
+                    }
                 } else if (newStatus === 'approved') {
                     update.status = 'approved';
                     update.approved_by = req.user.id;
                     update.approved_date = new Date();
+
+                    // Compatibilidad: si la solicitud no tiene allocation (legacy), la calculamos al aprobar.
+                    const hasAllocation = existing.allocation && (Number(existing.allocation.carryover_days) || 0) + (Number(existing.allocation.current_year_days) || 0) > 0;
+                    if (!hasAllocation) {
+                        const employee = await Employee.findById(existing.employee_id).select('vacation_carryover_days annual_vacation_days hire_date termination_date location').lean();
+                        if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+                        const computedYear = deriveVacationYear({
+                            explicitYear: existing.vacation_year,
+                            startDate: existing.start_date,
+                            reason: existing.reason
+                        });
+
+                        const settings = await getSettingsForAccess();
+                        const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
+                        const carryoverAvailable = Math.max(0, Number(employee.vacation_carryover_days) || 0);
+                        const yearBaseAllowance = computeProratedAnnualAllowanceDays(employee, computedYear, policy);
+                        const yearBalance = await buildTimeOffBalanceForEmployee(existing.employee_id, computedYear, { includePreviousYearForCarryover: false });
+                        const absDeducted = yearBalance && yearBalance.absences ? (Number(yearBalance.absences.deducted_days) || 0) : 0;
+                        const approvedConsumed = (Number(yearBalance.vacation.approved_days) || 0)
+                            + (Number(yearBalance.permissions.approved_days) || 0)
+                            + absDeducted;
+                        const remainingCurrentYearAfterApproved = Math.max(0, yearBaseAllowance - approvedConsumed);
+
+                        const totalDays = Number(existing.days) || 0;
+                        const totalAvailable = carryoverAvailable + remainingCurrentYearAfterApproved;
+                        if (totalDays > totalAvailable) {
+                            return res.status(409).json({
+                                error: `No hay saldo suficiente para aprobar. Disponibles: ${totalAvailable} (Años anteriores: ${carryoverAvailable}, Año ${computedYear}: ${remainingCurrentYearAfterApproved})`
+                            });
+                        }
+
+                        const carryoverToUse = Math.min(carryoverAvailable, totalDays);
+                        const currentYearToUse = Math.max(0, totalDays - carryoverToUse);
+                        const reserve = await reserveEmployeeCarryoverDays(existing.employee_id, carryoverToUse);
+                        if (!reserve.ok) {
+                            return res.status(409).json({ error: reserve.error || 'No se pudo reservar carryover' });
+                        }
+
+                        update.allocation = {
+                            carryover_days: carryoverToUse,
+                            current_year_days: currentYearToUse
+                        };
+                    }
                 } else if (newStatus === 'cancelled') {
                     update.status = 'cancelled';
                     update.cancelled_by = req.user.id;
                     update.cancelled_date = new Date();
                     if (cancellation_reason !== undefined) update.cancellation_reason = cancellation_reason;
+
+                    // Cancelación admin de una pendiente: liberar carryover reservado
+                    if (existing.status === 'pending') {
+                        const reservedCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                        await releaseEmployeeCarryoverDays(existing.employee_id, reservedCarry);
+                    }
                 } else if (newStatus === 'revoked') {
                     update.status = 'revoked';
                     update.revoked_by = req.user.id;
                     update.revoked_date = new Date();
                     if (revocation_reason !== undefined) update.revocation_reason = revocation_reason;
+
+                    // Revocación (aprobada -> revocada): devolver carryover consumido
+                    if (existing.status === 'approved') {
+                        const reservedCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                        await releaseEmployeeCarryoverDays(existing.employee_id, reservedCarry);
+                    }
                 }
             }
 
@@ -1155,7 +1348,7 @@ router.put('/:id', async (req, res) => {
 
         const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
 
-        const afterSnapshot = pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
+        const afterSnapshot = pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'allocation', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
         const changed = shallowDiff(beforeSnapshot, afterSnapshot);
 
         let auditAction = 'timeoff.update';
@@ -1235,6 +1428,11 @@ router.delete('/:id', async (req, res) => {
 
             const ok = await ensureEmployeeInScope(req, res, existing.employee_id);
             if (!ok) return;
+        }
+
+        if (existing.status === 'pending') {
+            const reservedCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+            await releaseEmployeeCarryoverDays(existing.employee_id, reservedCarry);
         }
 
         await Vacation.findByIdAndDelete(req.params.id);

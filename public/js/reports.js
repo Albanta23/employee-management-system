@@ -208,6 +208,47 @@ const reportsUtil = {
         doc.text(`Tipo: ${typeTitle || '-'}`, 25, y);
         y += 8;
 
+        // Sección opcional: saldo/consumo de vacaciones
+        if (data && data.vacation_balance && (typeTitle || '').toLowerCase().includes('vacacion')) {
+            const vb = data.vacation_balance;
+            y += 6;
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('SALDO DE VACACIONES', 20, y);
+            doc.setLineWidth(0.5);
+            doc.line(20, y + 2, 190, y + 2);
+
+            y += 10;
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+
+            const year = vb.year ?? '';
+            const carryRem = vb.carryover_remaining_days ?? '-';
+            const yearRem = vb.current_year_remaining_days ?? '-';
+            const totalRem = vb.total_remaining_days ?? '-';
+
+            doc.text(`Disponibles actuales (${year}): ${totalRem}`, 25, y);
+            y += 6;
+            doc.text(`- Años anteriores (pendientes): ${carryRem}`, 30, y);
+            y += 6;
+            doc.text(`- Año en vigor: ${yearRem}`, 30, y);
+
+            const usedCarry = vb.request_consumes_carryover_days ?? 0;
+            const usedYear = vb.request_consumes_current_year_days ?? 0;
+            if ((Number(usedCarry) || 0) > 0 || (Number(usedYear) || 0) > 0) {
+                y += 8;
+                doc.setFont('helvetica', 'bold');
+                doc.text('Consumo de esta solicitud', 25, y);
+                y += 6;
+                doc.setFont('helvetica', 'normal');
+                doc.text(`- Años anteriores: ${usedCarry}`, 30, y);
+                y += 6;
+                doc.text(`- Año en vigor: ${usedYear}`, 30, y);
+            }
+
+            y += 8;
+        }
+
         if (data.reason || data.notes) {
             doc.text(`Motivo/Notas:`, 25, y);
             y += 6;

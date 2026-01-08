@@ -187,6 +187,9 @@
     <script>
         if (!isAuthenticated()) window.location.href = 'index.html';
 
+        const urlParams = new URLSearchParams(window.location.search);
+        const employeeIdParam = urlParams.get('employee_id');
+
         let currentVacations = [];
         let currentBalanceEmployeeId = null;
 
@@ -314,7 +317,14 @@
         }
 
         async function loadVacations() {
-            const vacations = await vacationsAPI.getAll({ type: 'vacation' });
+            const params = { type: 'vacation' };
+            if (employeeIdParam) {
+                params.employee_id = employeeIdParam;
+                const h1 = document.querySelector('h1');
+                if (h1) h1.textContent = 'Vacaciones por Trabajador';
+            }
+
+            const vacations = await vacationsAPI.getAll(params);
             if (vacations) {
                 currentVacations = vacations;
                 renderVacations(vacations);
@@ -363,7 +373,37 @@
         async function printJustification(id) {
             const v = currentVacations.find(v => (v._id || v.id) === id);
             if (v) {
-                reportsUtil.generateJustification(v, 'Vacaciones');
+                // Añadir al PDF: saldo disponible + consumo de la solicitud (carryover vs año vigente)
+                try {
+                    const start = v.start_date ? new Date(v.start_date) : new Date();
+                    const year = Number.isFinite(start.getTime()) ? start.getFullYear() : new Date().getFullYear();
+                    const balance = await vacationsAPI.getBalance({ employee_id: v.employee_id, year });
+
+                    const carryRem = balance && balance.vacation ? (Number(balance.vacation.carryover_days) || 0) : 0;
+                    const totalRem = balance && balance.vacation ? (Number(balance.vacation.remaining_after_approved) || 0) : 0;
+                    const currentYearRem = Math.max(0, totalRem - carryRem);
+
+                    const alloc = v.allocation || {};
+                    const usedCarry = Number(alloc.carryover_days) || 0;
+                    const usedYear = Number(alloc.current_year_days) || 0;
+
+                    const enriched = {
+                        ...v,
+                        vacation_balance: {
+                            year,
+                            carryover_remaining_days: carryRem,
+                            current_year_remaining_days: currentYearRem,
+                            total_remaining_days: totalRem,
+                            request_consumes_carryover_days: usedCarry,
+                            request_consumes_current_year_days: usedYear
+                        }
+                    };
+
+                    reportsUtil.generateJustification(enriched, 'Vacaciones');
+                } catch (e) {
+                    // Si falla el balance, generamos el PDF igualmente
+                    reportsUtil.generateJustification(v, 'Vacaciones');
+                }
             }
         }
 

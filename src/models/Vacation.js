@@ -8,6 +8,12 @@ const VacationSchema = new mongoose.Schema({
     start_date: { type: Date, required: true },
     end_date: { type: Date, required: true },
     days: { type: Number, required: true },
+    // Desglose FIFO del consumo: primero carryover (años anteriores), luego año vigente.
+    // Nota: el campo `days` mantiene el total de la solicitud.
+    allocation: {
+        carryover_days: { type: Number, default: 0 },
+        current_year_days: { type: Number, default: 0 }
+    },
     type: { type: String, enum: ['vacation', 'personal', 'compensatory'], default: 'vacation' },
     status: { type: String, enum: ['pending', 'approved', 'rejected', 'cancelled', 'revoked'], default: 'pending' },
     // Motivo/nota indicada al solicitar (empleado o admin)

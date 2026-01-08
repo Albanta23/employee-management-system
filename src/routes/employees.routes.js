@@ -211,7 +211,7 @@ router.post('/', async (req, res) => {
         const hasAccess = await requireFeatureAccess(req, res, 'employees');
         if (!hasAccess) return;
 
-        const { full_name, dni, phone, email, position, location, salary, hire_date, notes, convention, annual_vacation_days, enableAccess, username, password } = req.body;
+        const { full_name, dni, phone, email, position, location, salary, hire_date, notes, convention, annual_vacation_days, vacation_carryover_days, enableAccess, username, password } = req.body;
 
         if (!full_name || !dni || !phone || !position || !location) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
@@ -222,6 +222,13 @@ router.post('/', async (req, res) => {
             : Number(annual_vacation_days);
         if (parsedAnnualVacationDays !== undefined && (!Number.isFinite(parsedAnnualVacationDays) || parsedAnnualVacationDays < 0)) {
             return res.status(400).json({ error: 'annual_vacation_days debe ser un número >= 0' });
+        }
+
+        const parsedCarryoverDays = vacation_carryover_days === undefined || vacation_carryover_days === null || vacation_carryover_days === ''
+            ? undefined
+            : Number(vacation_carryover_days);
+        if (parsedCarryoverDays !== undefined && (!Number.isFinite(parsedCarryoverDays) || parsedCarryoverDays < 0)) {
+            return res.status(400).json({ error: 'vacation_carryover_days debe ser un número >= 0' });
         }
 
         const employee = new Employee({
@@ -236,6 +243,7 @@ router.post('/', async (req, res) => {
             notes,
             convention,
             annual_vacation_days: parsedAnnualVacationDays,
+            vacation_carryover_days: parsedCarryoverDays,
             status: 'active'
         });
 
@@ -492,7 +500,7 @@ router.put('/:id', async (req, res) => {
         const inScope = await ensureEmployeeInScope(req, res, req.params.id);
         if (!inScope) return;
 
-        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, enableAccess, username, password } = req.body;
+        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, vacation_carryover_days, enableAccess, username, password } = req.body;
 
         function parseOptionalNumberOrNull(value, fieldName) {
             if (value === undefined) return { hasValue: false };
@@ -536,7 +544,7 @@ router.put('/:id', async (req, res) => {
         }
 
         const beforeDoc = await Employee.findById(req.params.id).lean();
-        const before = pick(beforeDoc || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days']);
+        const before = pick(beforeDoc || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days', 'vacation_carryover_days']);
 
         const update = {};
         if (full_name !== undefined) update.full_name = full_name;
@@ -564,11 +572,23 @@ router.put('/:id', async (req, res) => {
         if (annualVacationDaysWantsNull) update.annual_vacation_days = null;
         else if (parsedAnnualVacationDays !== undefined) update.annual_vacation_days = parsedAnnualVacationDays;
 
+        if (vacation_carryover_days !== undefined) {
+            if (vacation_carryover_days === null || vacation_carryover_days === '') {
+                update.vacation_carryover_days = 0;
+            } else {
+                const n = Number(vacation_carryover_days);
+                if (!Number.isFinite(n) || n < 0) {
+                    return res.status(400).json({ error: 'vacation_carryover_days debe ser un número >= 0' });
+                }
+                update.vacation_carryover_days = n;
+            }
+        }
+
         const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true, context: 'query' }).lean();
 
         if (!employee) return res.status(404).json({ error: 'Trabajador no encontrado' });
 
-        const after = pick(employee || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days']);
+        const after = pick(employee || {}, ['_id', 'full_name', 'dni', 'phone', 'email', 'position', 'location', 'salary', 'status', 'notes', 'convention', 'hire_date', 'termination_date', 'annual_vacation_days', 'vacation_carryover_days']);
         const changed = shallowDiff(before, after);
         await logAudit({
             req,

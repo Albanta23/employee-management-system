@@ -77,6 +77,46 @@ body {
   min-height: 100vh;
 }
 
+/* Badges (estado/etiquetas) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.1;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 18%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.badge-success {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.badge-warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.badge-error {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, transparent);
+  background: color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+.badge-info {
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 35%, transparent);
+  background: color-mix(in srgb, var(--info) 18%, transparent);
+}
+
 /* Botón de tema (abajo-izquierda) */
 .theme-toggle {
   position: fixed;

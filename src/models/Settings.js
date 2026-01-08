@@ -110,6 +110,12 @@ const settingsSchema = new mongoose.Schema({
         default: () => ({})
     },
 
+    // Año del último rollover ejecutado para pasar remanentes al carryover por empleado.
+    vacation_carryover_last_rollover_year: {
+        type: Number,
+        default: null
+    },
+
     updated_at: {
         type: Date,
         default: Date.now

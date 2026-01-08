@@ -49,8 +49,10 @@ El saldo se calcula por año natural:
     - `Employee.hire_date` (inicio)
     - `Employee.termination_date` (fin, si aplica)
     - Se redondea al incremento configurado (por defecto 0.5).
-- `carryover_days` (si está activo): días arrastrados del año anterior (no disfrutados) hasta un máximo.
-- `allowance_days`: total asignado (compatibilidad) = `base_allowance_days + carryover_days`.
+- `carryover_days`: días arrastrados de otros años.
+  - Estado actual: se toman de `Employee.vacation_carryover_days` (campo imputable manualmente en Gestión de empleados).
+  - Se consumen primero (FIFO) cuando se solicita/aprueba una vacación.
+- `allowance_days`: total asignado = `base_allowance_days + carryover_days`.
 - `approved_days`: suma de solicitudes `approved` dentro del año.
 - `pending_days`: suma de solicitudes `pending` dentro del año.
 - `rejected_days`: suma de solicitudes `rejected` dentro del año.
@@ -62,8 +64,34 @@ Campos derivados:
 
 Notas importantes:
 
-- El cálculo de carryover usa el año anterior como: `unused = max(0, prev_allowance - prev_approved)`.
-- Por ahora no se reparte “por fecha” el consumo del carryover (no se descuenta primero/según caducidad). La API devuelve `carryover_expiry_month_day` para informar/mostrar en UI.
+- El consumo de vacaciones se registra en `Vacation.allocation`:
+  - `allocation.carryover_days`: días consumidos del carryover (años anteriores).
+  - `allocation.current_year_days`: días consumidos del año vigente.
+- Para compatibilidad con solicitudes antiguas sin `allocation`, el sistema puede usar `Vacation.days` como fallback.
+
+### 4.1) Rollover anual (días no consumidos → carryover)
+
+Para que al cambiar de año no se pierdan los días no consumidos, existe un proceso de rollover que:
+
+- Calcula los días no consumidos del año anterior (en base a días anuales del empleado, vacaciones aprobadas imputadas a ese año y ausencias que descuentan vacaciones).
+- Suma esos días al campo `Employee.vacation_carryover_days`.
+- Usa `Settings.vacation_carryover_last_rollover_year` para evitar ejecutar el rollover dos veces.
+- Genera un `AuditLog` por empleado afectado (acción `vacation_rollover`).
+
+Ejecución manual:
+
+- `npm run vacation:rollover -- --year=2025`
+- `npm run vacation:rollover -- --year=2025 --dry-run`
+- `npm run vacation:rollover -- --year=2025 --force`
+
+Ejecución automática (scheduler opcional):
+
+- `npm run vacation:rollover:schedule`
+- Variables de entorno:
+  - `VACATION_ROLLOVER_CRON` (por defecto `10 0 1 1 *` → 00:10 del 1 de enero)
+  - `VACATION_ROLLOVER_RUN_ON_START=true` (ejecuta una vez al arrancar)
+  - `VACATION_ROLLOVER_DRY_RUN=true`
+  - `VACATION_ROLLOVER_FORCE=true`
 
 ## 5) Validación de solapes (backend)
 

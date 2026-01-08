@@ -221,6 +221,28 @@
                 <button onclick="saveVacationPolicy()" class="btn btn-primary" style="margin-top: 1rem;">💾 Guardar saldo anual avanzado</button>
             </div>
 
+            <!-- Rollover manual (serverless) -->
+            <div class="settings-section" id="vacationRolloverSection">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🔁 Rollover de vacaciones</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                    En Vercel (serverless) no existe un cron permanente. Usa este botón para ejecutar el rollover del <b>año anterior</b>
+                    y actualizar los “Días pendientes de otros años” de cada empleado.
+                </p>
+
+                <div class="grid grid-cols-2" style="gap: 1rem;">
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Último rollover ejecutado (año)</label>
+                        <input type="text" id="vacRolloverLastYear" class="form-control" disabled value="">
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;">Se guarda en Configuración para evitar duplicados.</p>
+                    </div>
+
+                    <div class="form-group" style="margin: 0; display:flex; flex-direction:column; justify-content:flex-end;">
+                        <button id="btnRunVacationRollover" onclick="runVacationRolloverManual()" class="btn btn-primary">▶️ Ejecutar rollover (año anterior)</button>
+                        <p id="vacRolloverResult" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;"></p>
+                    </div>
+                </div>
+            </div>
+
             <!-- PINs de Regularización -->
             <div class="settings-section" id="regularizationPinsSection">
                 <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">🔢 PINs de Regularización</h2>
@@ -553,6 +575,11 @@
 
                 const s = data.settings;
 
+                // Rollover marker
+                const last = (s.vacation_carryover_last_rollover_year ?? '');
+                const elLast = document.getElementById('vacRolloverLastYear');
+                if (elLast) elLast.value = last === null ? '' : String(last);
+
                 document.getElementById('coordinatorEnabled').checked = !!s.store_coordinator_enabled;
                 document.getElementById('storeLocations').value = Array.isArray(s.store_locations) ? s.store_locations.join('\n') : '';
 
@@ -573,6 +600,47 @@
             } catch (error) {
                 console.error('Error cargando coordinador:', error);
                 showAlert('Error al cargar el perfil de Coordinador', 'error');
+            }
+        }
+
+        async function runVacationRolloverManual() {
+            const btn = document.getElementById('btnRunVacationRollover');
+            const out = document.getElementById('vacRolloverResult');
+
+            const year = (new Date()).getFullYear() - 1;
+            const ok = confirm(`Esto ejecutará el rollover del año ${year} para todos los empleados.\n\n¿Continuar?`);
+            if (!ok) return;
+
+            try {
+                if (btn) btn.disabled = true;
+                if (out) out.textContent = 'Ejecutando...';
+
+                const result = await settingsAPI.runVacationRollover({ year });
+                if (!result) {
+                    if (out) out.textContent = '';
+                    return;
+                }
+
+                if (result.skipped) {
+                    showAlert(result.message || 'Rollover ya ejecutado para ese año', 'info');
+                } else {
+                    showAlert(`Rollover ${result.year} completado. Empleados actualizados: ${result.updatedEmployees}. Días añadidos: ${result.totalAddedDays}`, 'success');
+                }
+
+                if (out) {
+                    out.textContent = result.skipped
+                        ? (result.message || '')
+                        : `Año ${result.year}: empleados=${result.updatedEmployees}, días añadidos=${result.totalAddedDays}`;
+                }
+
+                // Refrescar el marker
+                await loadCoordinatorSettings();
+            } catch (error) {
+                console.error('Error ejecutando rollover:', error);
+                showAlert('Error al ejecutar el rollover', 'error');
+                if (out) out.textContent = '';
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 

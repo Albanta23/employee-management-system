@@ -296,6 +296,10 @@ const settingsAPI = {
     updateAdmin: (data) => callAPI(`${API_URL}/settings/admin-credentials`, {
         method: 'PUT',
         body: JSON.stringify(data)
+    }),
+    runVacationRollover: (data = {}) => callAPI(`${API_URL}/settings/vacation-rollover`, {
+        method: 'POST',
+        body: JSON.stringify(data)
     })
 };
 
