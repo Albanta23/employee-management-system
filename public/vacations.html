@@ -379,7 +379,7 @@
                     const year = Number.isFinite(start.getTime()) ? start.getFullYear() : new Date().getFullYear();
                     const balance = await vacationsAPI.getBalance({ employee_id: v.employee_id, year });
 
-                    const carryoverTotal = balance && balance.vacation ? (Number(balance.vacation.carryover_days) || 0) : 0;
+                    const carryoverTotal = balance && balance.vacation ? (Number(balance.vacation.carryover_total_days) || 0) : 0;
                     const carryRem = balance && balance.vacation ? (Number(balance.vacation.carryover_days) || 0) : 0;
                     const totalRem = balance && balance.vacation ? (Number(balance.vacation.remaining_after_approved) || 0) : 0;
                     const currentYearRem = Math.max(0, totalRem - carryRem);
@@ -403,6 +403,7 @@
 
                     reportsUtil.generateJustification(enriched, 'Vacaciones');
                 } catch (e) {
+                    console.error('Error enriqueciendo balance:', e);
                     // Si falla el balance, generamos el PDF igualmente
                     reportsUtil.generateJustification(v, 'Vacaciones');
                 }

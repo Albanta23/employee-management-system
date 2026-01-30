@@ -560,6 +560,20 @@ router.get('/balance', async (req, res) => {
         };
         balance.vacation.base_allowance_days = baseAllowanceDays;
         balance.vacation.carryover_days = carryoverDays;
+        
+        // Calcular el carryover TOTAL original (incluyendo días reservados en solicitudes pendientes)
+        const pendingVacationsThisYear = await Vacation.find({
+            employee_id,
+            vacation_year: year,
+            status: 'pending'
+        }).lean();
+        
+        const reservedCarryoverDays = pendingVacationsThisYear.reduce((sum, v) => {
+            const alloc = v.allocation || {};
+            return sum + (Number(alloc.carryover_days) || 0);
+        }, 0);
+        
+        balance.vacation.carryover_total_days = carryoverDays + reservedCarryoverDays;
         balance.vacation.previous_year_unused_days = previousYearUnusedDays;
         balance.vacation.allowance_days = allowanceDays;
         const absDeducted = balance.absences ? (Number(balance.absences.deducted_days) || 0) : 0;
