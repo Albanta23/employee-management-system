@@ -223,13 +223,14 @@ const reportsUtil = {
             doc.setFont('helvetica', 'normal');
 
             const year = vb.year ?? '';
+            const carryTotal = vb.carryover_total_days ?? '-';
             const carryRem = vb.carryover_remaining_days ?? '-';
             const yearRem = vb.current_year_remaining_days ?? '-';
             const totalRem = vb.total_remaining_days ?? '-';
 
             doc.text(`Disponibles actuales (${year}): ${totalRem}`, 25, y);
             y += 6;
-            doc.text(`- Años anteriores (pendientes): ${carryRem}`, 30, y);
+            doc.text(`- Años anteriores (disponibles): ${carryTotal}`, 30, y);
             y += 6;
             doc.text(`- Año en vigor: ${yearRem}`, 30, y);
 

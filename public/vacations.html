@@ -379,6 +379,7 @@
                     const year = Number.isFinite(start.getTime()) ? start.getFullYear() : new Date().getFullYear();
                     const balance = await vacationsAPI.getBalance({ employee_id: v.employee_id, year });
 
+                    const carryoverTotal = balance && balance.vacation ? (Number(balance.vacation.carryover_days) || 0) : 0;
                     const carryRem = balance && balance.vacation ? (Number(balance.vacation.carryover_days) || 0) : 0;
                     const totalRem = balance && balance.vacation ? (Number(balance.vacation.remaining_after_approved) || 0) : 0;
                     const currentYearRem = Math.max(0, totalRem - carryRem);
@@ -391,6 +392,7 @@
                         ...v,
                         vacation_balance: {
                             year,
+                            carryover_total_days: carryoverTotal,
                             carryover_remaining_days: carryRem,
                             current_year_remaining_days: currentYearRem,
                             total_remaining_days: totalRem,
