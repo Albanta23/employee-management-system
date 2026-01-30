@@ -385,8 +385,41 @@
                     const currentYearRem = Math.max(0, totalRem - carryRem);
 
                     const alloc = v.allocation || {};
-                    const usedCarry = Number(alloc.carryover_days) || 0;
-                    const usedYear = Number(alloc.current_year_days) || 0;
+                    let usedCarry = Number(alloc.carryover_days) || 0;
+                    let usedYear = Number(alloc.current_year_days) || 0;
+
+                    // Si la solicitud no tiene allocation (creada antes de FIFO) o allocation vacío,
+                    // recalculamos dinámicamente el consumo según FIFO
+                    const totalDays = Number(v.days) || 0;
+                    const hasValidAllocation = (usedCarry + usedYear) === totalDays && totalDays > 0;
+                    
+                    if (!hasValidAllocation && totalDays > 0) {
+                        // Recalcular FIFO: primero consume carryover, luego año actual
+                        // Necesitamos saber cuánto carryover había disponible ANTES de esta solicitud
+                        // Usamos carryover_total_days que incluye reservados + disponibles
+                        
+                        // Obtener todas las solicitudes del mismo empleado y año con allocation para saber el orden
+                        const allVacations = currentVacations.filter(
+                            vac => vac.employee_id === v.employee_id && 
+                            vac.vacation_year === (v.vacation_year || year) &&
+                            (vac.status === 'approved' || vac.status === 'pending')
+                        ).sort((a, b) => new Date(a.created_at || a.start_date) - new Date(b.created_at || b.start_date));
+
+                        // Calcular el carryover disponible al momento de esta solicitud
+                        let carryoverUsedBefore = 0;
+                        for (const vac of allVacations) {
+                            if ((vac._id || vac.id) === id) break;
+                            const vacAlloc = vac.allocation || {};
+                            carryoverUsedBefore += Number(vacAlloc.carryover_days) || 0;
+                        }
+
+                        // El carryover disponible para esta solicitud
+                        const carryoverAvailableForThis = Math.max(0, carryoverTotal - carryoverUsedBefore);
+                        
+                        // Aplicar FIFO: primero carryover, luego año actual
+                        usedCarry = Math.min(carryoverAvailableForThis, totalDays);
+                        usedYear = totalDays - usedCarry;
+                    }
 
                     const enriched = {
                         ...v,

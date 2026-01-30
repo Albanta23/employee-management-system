@@ -783,4 +783,233 @@ router.put('/admin-credentials', authenticateToken, isAdmin, async (req, res) =>
     }
 });
 
+// =====================================================
+// HERRAMIENTAS DE MANTENIMIENTO
+// =====================================================
+
+const Vacation = require('../models/Vacation');
+
+/**
+ * POST /api/settings/maintenance/fix-vacation-allocation
+ * Corrige el allocation FIFO de solicitudes de vacaciones antiguas
+ * que no tienen el campo allocation correctamente populado.
+ * Solo admin puede ejecutar esta acción.
+ */
+router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (req, res) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Acceso denegado. Solo administradores.' });
+        }
+
+        const dryRun = req.body.dry_run === true;
+        const results = {
+            dry_run: dryRun,
+            employees_processed: 0,
+            vacations_fixed: 0,
+            vacations_already_valid: 0,
+            details: []
+        };
+
+        // Obtener todos los empleados activos
+        const employees = await Employee.find({ status: { $ne: 'inactive' } }).lean();
+
+        for (const emp of employees) {
+            // Obtener todas las vacaciones del empleado ordenadas por fecha de creación
+            const vacations = await Vacation.find({
+                employee_id: emp._id,
+                type: 'vacation',
+                status: { $in: ['approved', 'pending'] }
+            }).sort({ created_at: 1 }).lean();
+
+            if (vacations.length === 0) continue;
+
+            results.employees_processed++;
+
+            // Calcular el carryover TOTAL original del empleado
+            // sumando lo que tiene ahora + lo que ya está reservado en solicitudes con allocation válido
+            let carryoverAvailable = emp.vacation_carryover_days || 0;
+
+            // Sumar días de carryover ya reservados en solicitudes existentes
+            for (const v of vacations) {
+                const alloc = v.allocation || {};
+                carryoverAvailable += Number(alloc.carryover_days) || 0;
+            }
+
+            const employeeDetail = {
+                employee_id: String(emp._id),
+                full_name: emp.full_name,
+                carryover_total: carryoverAvailable,
+                vacations: []
+            };
+
+            // Agrupar por vacation_year
+            const byYear = {};
+            for (const v of vacations) {
+                const year = v.vacation_year || new Date(v.start_date).getUTCFullYear();
+                if (!byYear[year]) byYear[year] = [];
+                byYear[year].push(v);
+            }
+
+            // Procesar cada año en orden
+            const years = Object.keys(byYear).map(Number).sort();
+
+            for (const year of years) {
+                const yearVacations = byYear[year].sort((a, b) =>
+                    new Date(a.created_at || a.start_date) - new Date(b.created_at || b.start_date)
+                );
+
+                let yearCarryoverRemaining = carryoverAvailable;
+
+                for (const v of yearVacations) {
+                    const alloc = v.allocation || {};
+                    const existingCarry = Number(alloc.carryover_days) || 0;
+                    const existingCurrent = Number(alloc.current_year_days) || 0;
+                    const totalDays = Number(v.days) || 0;
+
+                    // Verificar si el allocation es válido
+                    const isValid = (existingCarry + existingCurrent) === totalDays && totalDays > 0;
+
+                    if (isValid) {
+                        yearCarryoverRemaining -= existingCarry;
+                        results.vacations_already_valid++;
+                        continue;
+                    }
+
+                    // Necesita arreglo: calcular FIFO
+                    const newCarryDays = Math.min(yearCarryoverRemaining, totalDays);
+                    const newCurrentDays = totalDays - newCarryDays;
+
+                    employeeDetail.vacations.push({
+                        vacation_id: String(v._id),
+                        year: year,
+                        days: totalDays,
+                        old_allocation: { carryover_days: existingCarry, current_year_days: existingCurrent },
+                        new_allocation: { carryover_days: newCarryDays, current_year_days: newCurrentDays },
+                        fixed: !dryRun
+                    });
+
+                    if (!dryRun) {
+                        await Vacation.findByIdAndUpdate(v._id, {
+                            $set: {
+                                allocation: {
+                                    carryover_days: newCarryDays,
+                                    current_year_days: newCurrentDays
+                                }
+                            }
+                        });
+                    }
+
+                    yearCarryoverRemaining -= newCarryDays;
+                    results.vacations_fixed++;
+                }
+
+                carryoverAvailable = yearCarryoverRemaining;
+            }
+
+            if (employeeDetail.vacations.length > 0) {
+                results.details.push(employeeDetail);
+            }
+        }
+
+        // Registrar en auditoría
+        if (!dryRun && results.vacations_fixed > 0) {
+            await logAudit({
+                action: 'maintenance_fix_vacation_allocation',
+                userId: req.user.id,
+                username: req.user.username,
+                userRole: req.user.role,
+                entityType: 'System',
+                entityId: 'maintenance',
+                employeeId: '',
+                employeeLocation: '',
+                before: null,
+                after: { vacations_fixed: results.vacations_fixed },
+                meta: { dry_run: dryRun }
+            });
+        }
+
+        res.json({
+            success: true,
+            message: dryRun
+                ? `Simulación completada. Se arreglarían ${results.vacations_fixed} solicitudes.`
+                : `Proceso completado. Se arreglaron ${results.vacations_fixed} solicitudes.`,
+            results
+        });
+
+    } catch (error) {
+        console.error('Error en fix-vacation-allocation:', error);
+        res.status(500).json({ error: 'Error al ejecutar el proceso de corrección' });
+    }
+});
+
+/**
+ * GET /api/settings/maintenance/vacation-allocation-status
+ * Devuelve el estado actual de las solicitudes de vacaciones
+ * y cuántas tienen allocation inválido.
+ */
+router.get('/maintenance/vacation-allocation-status', authenticateToken, async (req, res) => {
+    try {
+        if (!req.user || req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Acceso denegado. Solo administradores.' });
+        }
+
+        const vacations = await Vacation.find({
+            type: 'vacation',
+            status: { $in: ['approved', 'pending'] }
+        }).lean();
+
+        let validCount = 0;
+        let invalidCount = 0;
+        const invalidByEmployee = {};
+
+        for (const v of vacations) {
+            const alloc = v.allocation || {};
+            const carry = Number(alloc.carryover_days) || 0;
+            const current = Number(alloc.current_year_days) || 0;
+            const totalDays = Number(v.days) || 0;
+
+            const isValid = (carry + current) === totalDays && totalDays > 0;
+
+            if (isValid) {
+                validCount++;
+            } else {
+                invalidCount++;
+                const empId = String(v.employee_id);
+                if (!invalidByEmployee[empId]) {
+                    invalidByEmployee[empId] = { count: 0, total_days: 0 };
+                }
+                invalidByEmployee[empId].count++;
+                invalidByEmployee[empId].total_days += totalDays;
+            }
+        }
+
+        // Obtener nombres de empleados con problemas
+        const empIds = Object.keys(invalidByEmployee);
+        const employees = empIds.length > 0
+            ? await Employee.find({ _id: { $in: empIds } }).select('full_name').lean()
+            : [];
+
+        const empMap = new Map(employees.map(e => [String(e._id), e.full_name]));
+
+        const invalidDetails = empIds.map(id => ({
+            employee_id: id,
+            full_name: empMap.get(id) || 'Desconocido',
+            vacations_invalid: invalidByEmployee[id].count,
+            total_days_affected: invalidByEmployee[id].total_days
+        }));
+
+        res.json({
+            total_vacations: vacations.length,
+            valid_allocation: validCount,
+            invalid_allocation: invalidCount,
+            needs_fix: invalidCount > 0,
+            invalid_details: invalidDetails
+        });
+
+    } catch (error) {
+        console.error('Error en vacation-allocation-status:', error);
+        res.status(500).json({ error: 'Error al obtener estado' });
+    }
+});
+
 module.exports = router;
