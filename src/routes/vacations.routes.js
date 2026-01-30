@@ -377,13 +377,37 @@ async function buildTimeOffBalanceForEmployee(employeeId, year, options = {}) {
     const vacations = itemsCurrentYear.filter(v => (v.type || 'vacation') === 'vacation');
     const permissions = itemsCurrentYear.filter(v => (v.type || 'vacation') !== 'vacation');
 
-    // Para balance anual (año vigente), solo contamos lo que consume del año vigente.
-    // Los días consumidos de carryover ya quedan reflejados en Employee.vacation_carryover_days.
+    // Para balance anual (año vigente), recalculamos FIFO dinámicamente.
+    // Esto asegura que siempre se muestre el desglose correcto aunque haya cambios en carryover.
     const getCurrentYearConsumedDays = (v) => {
         const a = v && v.allocation ? v.allocation : null;
         const current = a && Number.isFinite(Number(a.current_year_days)) ? Number(a.current_year_days) : null;
         if (current !== null) return Math.max(0, current);
         return Number(v && v.days) || 0;
+    };
+
+    // NUEVO: Recalcular FIFO dinámicamente para solicitudes pendientes
+    // Esto asegura que si cambió el carryover disponible, el balance refleje FIFO correctamente
+    const recalculateFIFODynamic = (vacationsList, carryoverAvailableAtTime, yearAllowance) => {
+        let carryoverUsed = 0;
+        let currentYearUsed = 0;
+        let tempCarryoverRemaining = carryoverAvailableAtTime;
+
+        for (const v of vacationsList) {
+            if (v.status !== 'pending') continue; // Solo pendientes recalculamos
+            
+            const totalDays = Number(v.days) || 0;
+            if (totalDays === 0) continue;
+
+            const carroverForThis = Math.min(tempCarryoverRemaining, totalDays);
+            const currentYearForThis = totalDays - carroverForThis;
+
+            carryoverUsed += carroverForThis;
+            currentYearUsed += currentYearForThis;
+            tempCarryoverRemaining -= carroverForThis;
+        }
+
+        return { carryoverUsed, currentYearUsed };
     };
 
     const vacationApproved = sumDaysByStatus(vacations, 'approved', getCurrentYearConsumedDays);
@@ -539,6 +563,19 @@ router.get('/balance', async (req, res) => {
         balance.vacation.previous_year_unused_days = previousYearUnusedDays;
         balance.vacation.allowance_days = allowanceDays;
         const absDeducted = balance.absences ? (Number(balance.absences.deducted_days) || 0) : 0;
+        
+        // IMPORTANTE: Recalcular dinámicamente el consumo de carryover vs año actual (FIFO)
+        // Esto asegura que aunque haya cambios en Employee.vacation_carryover_days,
+        // el balance siempre muestre el FIFO correcto
+        const pendingVacations = await Vacation.find({
+            employee_id,
+            vacation_year: year,
+            status: 'pending'
+        }).lean();
+        
+        const fifoRecalc = recalculateFIFODynamic(pendingVacations, carryoverDays, baseAllowanceDays);
+        const carryoverConsumedDynamic = fifoRecalc.carryoverUsed;
+        const currentYearConsumedDynamic = fifoRecalc.currentYearUsed;
         const approvedConsumed = (Number(balance.vacation.approved_days) || 0) + (Number(balance.permissions.approved_days) || 0) + absDeducted;
         const pendingConsumed = (Number(balance.vacation.approved_days) || 0)
             + (Number(balance.vacation.pending_days) || 0)
