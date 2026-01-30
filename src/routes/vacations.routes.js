@@ -957,7 +957,6 @@ router.post('/', async (req, res) => {
 
         // Cálculo automático de días reales (naturales menos festivos/findes según convenio)
         const days = await calculateVacationDays(startDate, endDate, employee.location);
-
         const computedVacationYear = deriveVacationYear({
             explicitYear: vacation_year,
             startDate,
@@ -965,7 +964,11 @@ router.post('/', async (req, res) => {
         });
 
         // FIFO: primero se consumen días pendientes de otros años (carryover), luego del año en vigor.
-        // Para validar disponibilidad del año vigente, usamos el balance actual (solo consume current_year_days).
+        // 1. Contar saldo disponible de carryover (Employee.vacation_carryover_days, sin reservar)
+        // 2. Contar saldo disponible del año vigente (allowance - consumo actual)
+        // 3. Validar total disponible >= días solicitados
+        // 4. Calcular cómo asignar: min(carryover_available, days) → carryover; resto → currentYear
+        // 5. Reservar carryover inmediatamente para evitar sobre-asignación
         const settings = await getSettingsForAccess();
         const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
 
@@ -1137,8 +1140,9 @@ router.put('/:id', async (req, res) => {
             }
 
             // Recalcular asignación FIFO si sigue pendiente (editar afecta reserva)
-            if (existing.status === 'pending') {
+            if (existing.status === 'pending' && (start_date || end_date || days || vacation_year !== undefined || reason !== undefined)) {
                 const oldCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                const oldCurrentYear = existing.allocation ? (Number(existing.allocation.current_year_days) || 0) : (Number(existing.days) || 0);
                 // Devolver reserva anterior antes de recalcular
                 await releaseEmployeeCarryoverDays(existing.employee_id, oldCarry);
 
@@ -1160,16 +1164,16 @@ router.put('/:id', async (req, res) => {
                 const yearBalance = await buildTimeOffBalanceForEmployee(existing.employee_id, computedYear, { includePreviousYearForCarryover: false });
                 const absDeducted = yearBalance && yearBalance.absences ? (Number(yearBalance.absences.deducted_days) || 0) : 0;
 
-                // OJO: yearBalance incluye esta misma solicitud con la asignación previa (que ya hemos devuelto).
-                // Para evitar doble contabilidad, restamos su impacto previo (current_year_days).
-                const prevCurrent = existing.allocation ? (Number(existing.allocation.current_year_days) || 0) : (Number(existing.days) || 0);
-                const pendingConsumed = (Number(yearBalance.vacation.approved_days) || 0)
-                    + (Number(yearBalance.vacation.pending_days) || 0)
+                // yearBalance incluye esta solicitud (pendiente) con allocation previa. 
+                // Descontamos su aporte previo al año vigente (oldCurrentYear) para evitar doble contabilidad.
+                const approvedConsumption = (Number(yearBalance.vacation.approved_days) || 0)
                     + (Number(yearBalance.permissions.approved_days) || 0)
+                    + absDeducted;
+                const pendingOthers = (Number(yearBalance.vacation.pending_days) || 0)
                     + (Number(yearBalance.permissions.pending_days) || 0)
-                    + absDeducted
-                    - prevCurrent;
-                const remainingCurrentYearAfterPending = Math.max(0, yearBaseAllowance - pendingConsumed);
+                    - (Number(existing.days) || 0); // Restar ESTA solicitud pendiente para evitar doble conteo
+                const consumedCurrentYear = approvedConsumption + pendingOthers + oldCurrentYear;
+                const remainingCurrentYearAfterPending = Math.max(0, yearBaseAllowance - consumedCurrentYear);
 
                 const newTotalDays = Number(update.days !== undefined ? update.days : existing.days) || 0;
                 const totalAvailable = carryoverAvailable + remainingCurrentYearAfterPending;
@@ -1342,6 +1346,67 @@ router.put('/:id', async (req, res) => {
                 } else if (days) {
                     // Permitir override explícito si no cambia fechas (mantener comportamiento existente)
                     update.days = days;
+                }
+
+                // Recalcular asignación FIFO si sigue pendiente (editar afecta reserva)
+                if (existing.status === 'pending' && (start_date || end_date || days || vacation_year !== undefined || reason !== undefined)) {
+                    const oldCarry = existing.allocation ? (Number(existing.allocation.carryover_days) || 0) : 0;
+                    // Devolver reserva anterior antes de recalcular
+                    await releaseEmployeeCarryoverDays(existing.employee_id, oldCarry);
+
+                    const employee = await Employee.findById(existing.employee_id).select('vacation_carryover_days annual_vacation_days hire_date termination_date location').lean();
+                    if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+                    const effectiveStart = parseIsoDateOrNull(update.start_date || existing.start_date);
+                    const effectiveEnd = parseIsoDateOrNull(update.end_date || existing.end_date);
+                    const computedYear = deriveVacationYear({
+                        explicitYear: (update.vacation_year !== undefined ? update.vacation_year : existing.vacation_year),
+                        startDate: effectiveStart,
+                        reason: (update.reason !== undefined ? update.reason : existing.reason)
+                    });
+
+                    const settings = await getSettingsForAccess();
+                    const policy = normalizeVacationPolicy(settings && settings.vacation_policy ? settings.vacation_policy : null);
+                    const carryoverAvailable = Math.max(0, Number(employee.vacation_carryover_days) || 0);
+                    const yearBaseAllowance = computeProratedAnnualAllowanceDays(employee, computedYear, policy);
+                    const yearBalance = await buildTimeOffBalanceForEmployee(existing.employee_id, computedYear, { includePreviousYearForCarryover: false });
+                    const absDeducted = yearBalance && yearBalance.absences ? (Number(yearBalance.absences.deducted_days) || 0) : 0;
+
+                    // OJO: yearBalance incluye esta misma solicitud con la asignación previa (que ya hemos devuelto).
+                    // Para evitar doble contabilidad, restamos su impacto previo (current_year_days).
+                    const prevCurrent = existing.allocation ? (Number(existing.allocation.current_year_days) || 0) : (Number(existing.days) || 0);
+                    const pendingConsumed = (Number(yearBalance.vacation.approved_days) || 0)
+                        + (Number(yearBalance.vacation.pending_days) || 0)
+                        + (Number(yearBalance.permissions.approved_days) || 0)
+                        + (Number(yearBalance.permissions.pending_days) || 0)
+                        + absDeducted
+                        - prevCurrent;
+                    const remainingCurrentYearAfterPending = Math.max(0, yearBaseAllowance - pendingConsumed);
+
+                    const newTotalDays = Number(update.days !== undefined ? update.days : existing.days) || 0;
+                    const totalAvailable = carryoverAvailable + remainingCurrentYearAfterPending;
+                    if (newTotalDays > totalAvailable) {
+                        // Volver a reservar lo anterior para no dejar el carryover inflado
+                        await reserveEmployeeCarryoverDays(existing.employee_id, oldCarry);
+                        return res.status(409).json({
+                            error: `No hay saldo suficiente tras el cambio. Disponibles: ${totalAvailable} (Años anteriores: ${carryoverAvailable}, Año ${computedYear}: ${remainingCurrentYearAfterPending})`
+                        });
+                    }
+
+                    const carryoverToUse = Math.min(carryoverAvailable, newTotalDays);
+                    const currentYearToUse = Math.max(0, newTotalDays - carryoverToUse);
+
+                    const reserve = await reserveEmployeeCarryoverDays(existing.employee_id, carryoverToUse);
+                    if (!reserve.ok) {
+                        // Volver a reservar lo anterior
+                        await reserveEmployeeCarryoverDays(existing.employee_id, oldCarry);
+                        return res.status(409).json({ error: reserve.error || 'No se pudo reservar carryover' });
+                    }
+
+                    update.allocation = {
+                        carryover_days: carryoverToUse,
+                        current_year_days: currentYearToUse
+                    };
                 }
             }
         }
