@@ -179,6 +179,13 @@
             autocomplete="current-password" />
         </div>
 
+        <div class="form-group" id="rememberMeContainer" style="margin-top: var(--spacing-md);">
+          <label style="display:flex; align-items:center; gap: var(--spacing-sm); margin-bottom: 0; cursor: pointer;">
+            <input type="checkbox" id="rememberMe" style="cursor: pointer;" />
+            <span style="font-size: 0.875rem; color: var(--text-secondary);">Recordar mis datos</span>
+          </label>
+        </div>
+
         <div class="form-group" id="biometricOptInContainer" style="display:none; margin-top: var(--spacing-md);">
           <label class="form-label" style="display:flex; align-items:center; gap: var(--spacing-sm); margin-bottom: 0;">
             <input type="checkbox" id="enableBiometric" />
@@ -224,8 +231,36 @@
   <script>
     // Inicializar UI biométrica (solo visible en app nativa y si está disponible)
     window.addEventListener('DOMContentLoaded', () => {
+      // Cargar datos guardados (si existen)
+      const savedUsername = localStorage.getItem('savedUsername');
+      if (savedUsername) {
+        document.getElementById('username').value = savedUsername;
+        document.getElementById('rememberMe').checked = true;
+        // Auto-focus en password para facilitar entrada
+        document.getElementById('password').focus();
+      }
+
       if (window.BiometricAuth && typeof window.BiometricAuth.initLoginPage === 'function') {
         window.BiometricAuth.initLoginPage();
+      }
+    });
+
+    // Guardar/eliminar username cuando cambia el checkbox
+    document.getElementById('rememberMe').addEventListener('change', (e) => {
+      if (e.target.checked) {
+        const username = document.getElementById('username').value.trim();
+        if (username) {
+          localStorage.setItem('savedUsername', username);
+        }
+      } else {
+        localStorage.removeItem('savedUsername');
+      }
+    });
+
+    // Actualizar savedUsername cuando cambia el input (si el checkbox está marcado)
+    document.getElementById('username').addEventListener('input', (e) => {
+      if (document.getElementById('rememberMe').checked) {
+        localStorage.setItem('savedUsername', e.target.value.trim());
       }
     });
 
@@ -257,6 +292,14 @@
 
           if (!response.ok) {
             throw new Error(data.error || 'Error al iniciar sesión');
+          }
+
+          // Guardar username si está marcado "Recordar datos"
+          const rememberMe = document.getElementById('rememberMe').checked;
+          if (rememberMe) {
+            localStorage.setItem('savedUsername', username.trim());
+          } else {
+            localStorage.removeItem('savedUsername');
           }
           
           if (data.forceChange) {
