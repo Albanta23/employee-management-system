@@ -564,18 +564,6 @@ router.get('/balance', async (req, res) => {
         balance.vacation.allowance_days = allowanceDays;
         const absDeducted = balance.absences ? (Number(balance.absences.deducted_days) || 0) : 0;
         
-        // IMPORTANTE: Recalcular dinámicamente el consumo de carryover vs año actual (FIFO)
-        // Esto asegura que aunque haya cambios en Employee.vacation_carryover_days,
-        // el balance siempre muestre el FIFO correcto
-        const pendingVacations = await Vacation.find({
-            employee_id,
-            vacation_year: year,
-            status: 'pending'
-        }).lean();
-        
-        const fifoRecalc = recalculateFIFODynamic(pendingVacations, carryoverDays, baseAllowanceDays);
-        const carryoverConsumedDynamic = fifoRecalc.carryoverUsed;
-        const currentYearConsumedDynamic = fifoRecalc.currentYearUsed;
         const approvedConsumed = (Number(balance.vacation.approved_days) || 0) + (Number(balance.permissions.approved_days) || 0) + absDeducted;
         const pendingConsumed = (Number(balance.vacation.approved_days) || 0)
             + (Number(balance.vacation.pending_days) || 0)
