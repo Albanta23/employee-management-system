@@ -208,6 +208,9 @@ const reportsUtil = {
         doc.text(`Tipo: ${typeTitle || '-'}`, 25, y);
         y += 8;
 
+        doc.text(`Estado: ${(data.status || 'pendiente').toUpperCase()}`, 25, y);
+        y += 8;
+
         // Sección opcional: saldo/consumo de vacaciones
         if (data && data.vacation_balance && (typeTitle || '').toLowerCase().includes('vacacion')) {
             const vb = data.vacation_balance;
@@ -257,10 +260,6 @@ const reportsUtil = {
             doc.text(splitReason, 30, y);
             y += (splitReason.length * 6);
         }
-
-        y += 15;
-        doc.setFont('helvetica', 'bold');
-        doc.text(`Estado: ${(data.status || 'pendiente').toUpperCase()}`, 25, y);
 
         // Sección: Firmas
         y = 230;
