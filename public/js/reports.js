@@ -247,7 +247,7 @@ const reportsUtil = {
                 doc.text(`- Año en vigor: ${usedYear}`, 30, y);
             }
 
-            y += 8;
+            y += 12;
         }
 
         if (data.reason || data.notes) {
@@ -258,7 +258,8 @@ const reportsUtil = {
             y += (splitReason.length * 6);
         }
 
-        y += 10;
+        y += 15;
+        doc.setFont('helvetica', 'bold');
         doc.text(`Estado: ${(data.status || 'pendiente').toUpperCase()}`, 25, y);
 
         // Sección: Firmas
