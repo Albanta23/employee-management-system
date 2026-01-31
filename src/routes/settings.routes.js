@@ -825,20 +825,30 @@ router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (re
 
             results.employees_processed++;
 
-            // Calcular el carryover TOTAL original del empleado
-            // sumando lo que tiene ahora + lo que ya está reservado en solicitudes con allocation válido
-            let carryoverAvailable = emp.vacation_carryover_days || 0;
-
-            // Sumar días de carryover ya reservados en solicitudes existentes
+            // El carryover TOTAL disponible para el empleado:
+            // Es vacation_carryover_days (lo que tiene ahora sin usar)
+            // MÁS lo que ya ha consumido SOLO en solicitudes APROBADAS
+            // (las PENDIENTES aún no se han descontado del empleado, y su allocation puede estar mal)
+            let carryoverUsedInApproved = 0;
             for (const v of vacations) {
-                const alloc = v.allocation || {};
-                carryoverAvailable += Number(alloc.carryover_days) || 0;
+                if (v.status === 'approved') {
+                    const alloc = v.allocation || {};
+                    carryoverUsedInApproved += Number(alloc.carryover_days) || 0;
+                }
             }
+            
+            // El carryover total original = disponible actual + ya usado en APROBADAS
+            const carryoverTotalOriginal = (emp.vacation_carryover_days || 0) + carryoverUsedInApproved;
+            
+            console.log(`[DEBUG FIFO] Empleado: ${emp.full_name}`);
+            console.log(`[DEBUG FIFO]   - carryover disponible ahora: ${emp.vacation_carryover_days || 0}`);
+            console.log(`[DEBUG FIFO]   - carryover usado en APROBADAS: ${carryoverUsedInApproved}`);
+            console.log(`[DEBUG FIFO]   - carryover TOTAL original: ${carryoverTotalOriginal}`);
 
             const employeeDetail = {
                 employee_id: String(emp._id),
                 full_name: emp.full_name,
-                carryover_total: carryoverAvailable,
+                carryover_total: carryoverTotalOriginal,
                 vacations: []
             };
 
@@ -850,15 +860,14 @@ router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (re
                 byYear[year].push(v);
             }
 
-            // Procesar cada año en orden
+            // Procesar cada año en orden - recalcular FIFO para TODAS las solicitudes
             const years = Object.keys(byYear).map(Number).sort();
+            let carryoverRemaining = carryoverTotalOriginal;
 
             for (const year of years) {
                 const yearVacations = byYear[year].sort((a, b) =>
                     new Date(a.created_at || a.start_date) - new Date(b.created_at || b.start_date)
                 );
-
-                let yearCarryoverRemaining = carryoverAvailable;
 
                 for (const v of yearVacations) {
                     const alloc = v.allocation || {};
@@ -866,25 +875,34 @@ router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (re
                     const existingCurrent = Number(alloc.current_year_days) || 0;
                     const totalDays = Number(v.days) || 0;
 
-                    // Verificar si el allocation es válido
-                    const isValid = (existingCarry + existingCurrent) === totalDays && totalDays > 0;
+                    console.log(`[DEBUG FIFO]   Solicitud ${v._id} (${totalDays} días, año ${year}):`);
+                    console.log(`[DEBUG FIFO]     - carryoverRemaining antes: ${carryoverRemaining}`);
 
-                    if (isValid) {
-                        yearCarryoverRemaining -= existingCarry;
+                    // Calcular FIFO correcto: primero carryover, luego año actual
+                    const correctCarryDays = Math.min(carryoverRemaining, totalDays);
+                    const correctCurrentDays = totalDays - correctCarryDays;
+
+                    console.log(`[DEBUG FIFO]     - allocation existente: carry=${existingCarry}, current=${existingCurrent}`);
+                    console.log(`[DEBUG FIFO]     - allocation CORRECTO:  carry=${correctCarryDays}, current=${correctCurrentDays}`);
+
+                    // Verificar si el allocation actual coincide con FIFO correcto
+                    const isCorrect = existingCarry === correctCarryDays && existingCurrent === correctCurrentDays;
+
+                    if (isCorrect) {
+                        // Ya está correcto, descontar del carryover disponible
+                        carryoverRemaining -= correctCarryDays;
+                        console.log(`[DEBUG FIFO]     - CORRECTO (no cambio), carryoverRemaining después: ${carryoverRemaining}`);
                         results.vacations_already_valid++;
                         continue;
                     }
 
-                    // Necesita arreglo: calcular FIFO
-                    const newCarryDays = Math.min(yearCarryoverRemaining, totalDays);
-                    const newCurrentDays = totalDays - newCarryDays;
-
+                    // Necesita corrección
                     employeeDetail.vacations.push({
                         vacation_id: String(v._id),
                         year: year,
                         days: totalDays,
                         old_allocation: { carryover_days: existingCarry, current_year_days: existingCurrent },
-                        new_allocation: { carryover_days: newCarryDays, current_year_days: newCurrentDays },
+                        new_allocation: { carryover_days: correctCarryDays, current_year_days: correctCurrentDays },
                         fixed: !dryRun
                     });
 
@@ -892,18 +910,18 @@ router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (re
                         await Vacation.findByIdAndUpdate(v._id, {
                             $set: {
                                 allocation: {
-                                    carryover_days: newCarryDays,
-                                    current_year_days: newCurrentDays
+                                    carryover_days: correctCarryDays,
+                                    current_year_days: correctCurrentDays
                                 }
                             }
                         });
                     }
 
-                    yearCarryoverRemaining -= newCarryDays;
+                    // Descontar del carryover disponible
+                    carryoverRemaining -= correctCarryDays;
+                    console.log(`[DEBUG FIFO]     - CORREGIDO, carryoverRemaining después: ${carryoverRemaining}`);
                     results.vacations_fixed++;
                 }
-
-                carryoverAvailable = yearCarryoverRemaining;
             }
 
             if (employeeDetail.vacations.length > 0) {
@@ -945,7 +963,7 @@ router.post('/maintenance/fix-vacation-allocation', authenticateToken, async (re
 /**
  * GET /api/settings/maintenance/vacation-allocation-status
  * Devuelve el estado actual de las solicitudes de vacaciones
- * y cuántas tienen allocation inválido.
+ * y cuántas tienen allocation FIFO incorrecto.
  */
 router.get('/maintenance/vacation-allocation-status', authenticateToken, async (req, res) => {
     try {
@@ -953,53 +971,98 @@ router.get('/maintenance/vacation-allocation-status', authenticateToken, async (
             return res.status(403).json({ error: 'Acceso denegado. Solo administradores.' });
         }
 
-        const vacations = await Vacation.find({
-            type: 'vacation',
-            status: { $in: ['approved', 'pending'] }
-        }).lean();
-
+        // Obtener todos los empleados activos
+        const employees = await Employee.find({ status: { $ne: 'inactive' } }).lean();
+        
+        let totalVacations = 0;
         let validCount = 0;
         let invalidCount = 0;
         const invalidByEmployee = {};
 
-        for (const v of vacations) {
-            const alloc = v.allocation || {};
-            const carry = Number(alloc.carryover_days) || 0;
-            const current = Number(alloc.current_year_days) || 0;
-            const totalDays = Number(v.days) || 0;
+        for (const emp of employees) {
+            const vacations = await Vacation.find({
+                employee_id: emp._id,
+                type: 'vacation',
+                status: { $in: ['approved', 'pending'] }
+            }).sort({ created_at: 1 }).lean();
 
-            const isValid = (carry + current) === totalDays && totalDays > 0;
+            if (vacations.length === 0) continue;
 
-            if (isValid) {
-                validCount++;
-            } else {
-                invalidCount++;
-                const empId = String(v.employee_id);
-                if (!invalidByEmployee[empId]) {
-                    invalidByEmployee[empId] = { count: 0, total_days: 0 };
+            // Calcular carryover TOTAL disponible:
+            // Solo sumamos carryover de solicitudes APROBADAS (ya descontadas del empleado)
+            // NO de PENDIENTES (su allocation puede estar mal)
+            let carryoverUsedInApproved = 0;
+            for (const v of vacations) {
+                if (v.status === 'approved') {
+                    const alloc = v.allocation || {};
+                    carryoverUsedInApproved += Number(alloc.carryover_days) || 0;
                 }
-                invalidByEmployee[empId].count++;
-                invalidByEmployee[empId].total_days += totalDays;
+            }
+            const carryoverTotalOriginal = (emp.vacation_carryover_days || 0) + carryoverUsedInApproved;
+
+            // Agrupar por año
+            const byYear = {};
+            for (const v of vacations) {
+                const year = v.vacation_year || new Date(v.start_date).getUTCFullYear();
+                if (!byYear[year]) byYear[year] = [];
+                byYear[year].push(v);
+            }
+
+            // Recalcular FIFO y comparar
+            const years = Object.keys(byYear).map(Number).sort();
+            let carryoverRemaining = carryoverTotalOriginal;
+
+            for (const year of years) {
+                const yearVacations = byYear[year].sort((a, b) =>
+                    new Date(a.created_at || a.start_date) - new Date(b.created_at || b.start_date)
+                );
+
+                for (const v of yearVacations) {
+                    totalVacations++;
+                    const alloc = v.allocation || {};
+                    const existingCarry = Number(alloc.carryover_days) || 0;
+                    const existingCurrent = Number(alloc.current_year_days) || 0;
+                    const totalDays = Number(v.days) || 0;
+
+                    // Calcular FIFO correcto
+                    const correctCarryDays = Math.min(carryoverRemaining, totalDays);
+                    const correctCurrentDays = totalDays - correctCarryDays;
+
+                    // Verificar si coincide
+                    const isCorrect = existingCarry === correctCarryDays && existingCurrent === correctCurrentDays;
+
+                    if (isCorrect) {
+                        validCount++;
+                    } else {
+                        invalidCount++;
+                        const empId = String(emp._id);
+                        if (!invalidByEmployee[empId]) {
+                            invalidByEmployee[empId] = { 
+                                full_name: emp.full_name,
+                                count: 0, 
+                                total_days: 0,
+                                carryover_available: carryoverTotalOriginal
+                            };
+                        }
+                        invalidByEmployee[empId].count++;
+                        invalidByEmployee[empId].total_days += totalDays;
+                    }
+
+                    carryoverRemaining -= correctCarryDays;
+                }
             }
         }
 
-        // Obtener nombres de empleados con problemas
-        const empIds = Object.keys(invalidByEmployee);
-        const employees = empIds.length > 0
-            ? await Employee.find({ _id: { $in: empIds } }).select('full_name').lean()
-            : [];
-
-        const empMap = new Map(employees.map(e => [String(e._id), e.full_name]));
-
-        const invalidDetails = empIds.map(id => ({
+        const invalidDetails = Object.entries(invalidByEmployee).map(([id, data]) => ({
             employee_id: id,
-            full_name: empMap.get(id) || 'Desconocido',
-            vacations_invalid: invalidByEmployee[id].count,
-            total_days_affected: invalidByEmployee[id].total_days
+            full_name: data.full_name,
+            vacations_invalid: data.count,
+            total_days_affected: data.total_days,
+            carryover_available: data.carryover_available
         }));
 
         res.json({
-            total_vacations: vacations.length,
+            total_vacations: totalVacations,
             valid_allocation: validCount,
             invalid_allocation: invalidCount,
             needs_fix: invalidCount > 0,
