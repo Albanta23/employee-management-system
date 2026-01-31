@@ -211,6 +211,14 @@ const reportsUtil = {
         doc.text(`Estado: ${(data.status || 'pendiente').toUpperCase()}`, 25, y);
         y += 8;
 
+        if (data.reason || data.notes) {
+            doc.text(`Motivo/Notas:`, 25, y);
+            y += 6;
+            const splitReason = doc.splitTextToSize(data.reason || data.notes || '-', 160);
+            doc.text(splitReason, 30, y);
+            y += (splitReason.length * 6) + 2;
+        }
+
         // Sección opcional: saldo/consumo de vacaciones
         if (data && data.vacation_balance && (typeTitle || '').toLowerCase().includes('vacacion')) {
             const vb = data.vacation_balance;
@@ -251,14 +259,6 @@ const reportsUtil = {
             }
 
             y += 12;
-        }
-
-        if (data.reason || data.notes) {
-            doc.text(`Motivo/Notas:`, 25, y);
-            y += 6;
-            const splitReason = doc.splitTextToSize(data.reason || data.notes || '-', 160);
-            doc.text(splitReason, 30, y);
-            y += (splitReason.length * 6);
         }
 
         // Sección: Firmas
