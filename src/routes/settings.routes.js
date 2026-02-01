@@ -1081,9 +1081,144 @@ router.get('/maintenance/vacation-allocation-status', authenticateToken, async (
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const crypto = require('crypto');
 
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', '..', 'backups', 'mongo');
+const DEFAULT_KEEP = Number.isFinite(Number(process.env.BACKUP_KEEP)) ? Number(process.env.BACKUP_KEEP) : 30;
+
+// Utilidades de backup
+function toSafeTimestamp(d = new Date()) {
+    return d.toISOString().replace(/[:.]/g, '-').replace(/Z$/, 'Z');
+}
+
+function ensureDir(p) {
+    fs.mkdirSync(p, { recursive: true });
+}
+
+function sha256File(filePath) {
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const s = fs.createReadStream(filePath);
+        s.on('error', reject);
+        s.on('data', (chunk) => hash.update(chunk));
+        s.on('end', () => resolve(hash.digest('hex')));
+    });
+}
+
+function listBackupFolders(dir) {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => d.name)
+        .sort()
+        .reverse();
+}
+
+function rotateBackups(typedDir, keep) {
+    const folders = listBackupFolders(typedDir);
+    const toDelete = folders.slice(keep);
+    for (const name of toDelete) {
+        const full = path.join(typedDir, name);
+        try {
+            fs.rmSync(full, { recursive: true, force: true });
+        } catch (e) {
+            console.warn('⚠️  No se pudo borrar backup antiguo:', full, e && e.message ? e.message : e);
+        }
+    }
+    return { total: folders.length, deleted: toDelete.length };
+}
+
+// Función principal de backup MongoDB (ejecutada inline)
+async function createMongoBackup(options = {}) {
+    const { verify = true, keep = DEFAULT_KEEP } = options;
+    const mongoose = require('mongoose');
+    
+    const typedDir = BACKUP_DIR;
+    ensureDir(typedDir);
+
+    const backupName = toSafeTimestamp(new Date());
+    const outDir = path.join(typedDir, backupName);
+    ensureDir(outDir);
+
+    const modelNames = mongoose.modelNames().slice().sort();
+    if (modelNames.length === 0) {
+        throw new Error('No se encontraron modelos de Mongoose para exportar.');
+    }
+
+    const manifest = {
+        type: 'mongo',
+        createdAt: new Date().toISOString(),
+        models: [],
+        files: [],
+        app: {
+            name: 'employee-management-system',
+            version: (() => {
+                try {
+                    const pkg = require('../../package.json');
+                    return pkg && pkg.version ? pkg.version : null;
+                } catch (_) {
+                    return null;
+                }
+            })()
+        }
+    };
+
+    for (const modelName of modelNames) {
+        const Model = mongoose.model(modelName);
+        const fileBase = `${modelName}.jsonl`;
+        const filePath = path.join(outDir, fileBase);
+
+        let count = 0;
+        const ws = fs.createWriteStream(filePath, { encoding: 'utf8' });
+        const cursor = Model.find({}).lean().cursor();
+        for await (const doc of cursor) {
+            ws.write(JSON.stringify(doc) + '\n');
+            count += 1;
+        }
+        await new Promise((resolve, reject) => {
+            ws.end(() => resolve());
+            ws.on('error', reject);
+        });
+
+        const stats = fs.statSync(filePath);
+        const entry = {
+            model: modelName,
+            collection: Model.collection && Model.collection.name ? Model.collection.name : null,
+            count,
+            file: fileBase,
+            bytes: stats.size
+        };
+        manifest.models.push({ name: modelName, collection: entry.collection, count });
+        manifest.files.push(entry);
+    }
+
+    const manifestPath = path.join(outDir, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+    if (verify) {
+        const fileHashes = [];
+        for (const f of manifest.files) {
+            const fp = path.join(outDir, f.file);
+            const hash = await sha256File(fp);
+            fileHashes.push({ file: f.file, sha256: hash });
+        }
+        const manifestHash = await sha256File(manifestPath);
+        fs.writeFileSync(
+            path.join(outDir, 'checksums.json'), 
+            JSON.stringify({ files: fileHashes, manifest: { file: 'manifest.json', sha256: manifestHash } }, null, 2), 
+            'utf8'
+        );
+    }
+
+    rotateBackups(typedDir, keep);
+
+    return {
+        backupName,
+        outDir,
+        models: manifest.models.length,
+        totalDocs: manifest.models.reduce((sum, m) => sum + m.count, 0)
+    };
+}
 
 // GET /api/settings/backups - Listar backups disponibles
 router.get('/backups', authenticateToken, isAdmin, async (req, res) => {
@@ -1145,76 +1280,35 @@ router.post('/backups/create', authenticateToken, isAdmin, async (req, res) => {
     try {
         const { verify = true } = req.body;
 
-        // Ejecutar el script de backup como proceso hijo
-        const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'backup.js');
-        
-        const args = ['--type=mongo'];
-        if (verify) args.push('--verify=true');
+        // Crear backup directamente (sin spawn)
+        const result = await createMongoBackup({ verify });
 
-        const child = spawn('node', [scriptPath, ...args], {
-            cwd: path.join(__dirname, '..', '..'),
-            env: { ...process.env }
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        child.on('close', async (code) => {
-            if (code !== 0) {
-                console.error('Backup failed:', stderr || stdout);
-                return res.status(500).json({ 
-                    error: 'Error al crear backup',
-                    details: stderr || stdout
-                });
+        // Log de auditoría
+        await logAudit({
+            action: 'backup_created',
+            user_id: req.user.id,
+            user_name: req.user.username,
+            entity_type: 'system',
+            entity_id: 'backup',
+            changes: { 
+                backup_name: result.backupName, 
+                verify,
+                models: result.models,
+                total_docs: result.totalDocs
             }
-
-            // Obtener el backup más reciente
-            const backupDir = BACKUP_DIR;
-            if (!fs.existsSync(backupDir)) {
-                return res.status(500).json({ error: 'No se encontró la carpeta de backups' });
-            }
-
-            const folders = fs.readdirSync(backupDir, { withFileTypes: true })
-                .filter(d => d.isDirectory())
-                .map(d => d.name)
-                .sort()
-                .reverse();
-
-            const latestBackup = folders[0] || null;
-
-            // Log de auditoría
-            await logAudit({
-                action: 'backup_created',
-                user_id: req.user.id,
-                user_name: req.user.username,
-                entity_type: 'system',
-                entity_id: 'backup',
-                changes: { backup_name: latestBackup, verify }
-            });
-
-            res.json({
-                success: true,
-                message: 'Backup creado correctamente',
-                backup_name: latestBackup
-            });
         });
 
-        child.on('error', (err) => {
-            console.error('Error spawning backup process:', err);
-            res.status(500).json({ error: 'Error al ejecutar el script de backup' });
+        res.json({
+            success: true,
+            message: 'Backup creado correctamente',
+            backup_name: result.backupName,
+            models: result.models,
+            total_docs: result.totalDocs
         });
 
     } catch (error) {
         console.error('Error creando backup:', error);
-        res.status(500).json({ error: 'Error al crear backup' });
+        res.status(500).json({ error: 'Error al crear backup: ' + (error.message || 'Error desconocido') });
     }
 });
 
@@ -1306,22 +1400,13 @@ router.post('/backups/:name/restore', authenticateToken, isAdmin, async (req, re
         // Crear backup de seguridad antes de restaurar
         let safetyBackupName = null;
         if (create_safety_backup) {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, 'Z');
-            safetyBackupName = `safety-before-restore-${timestamp}`;
-            
-            // Ejecutar backup de seguridad
-            const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'backup.js');
-            await new Promise((resolve, reject) => {
-                const child = spawn('node', [scriptPath, '--type=mongo'], {
-                    cwd: path.join(__dirname, '..', '..'),
-                    env: { ...process.env }
-                });
-                child.on('close', (code) => {
-                    if (code !== 0) reject(new Error('Safety backup failed'));
-                    else resolve();
-                });
-                child.on('error', reject);
-            });
+            try {
+                const safetyResult = await createMongoBackup({ verify: false });
+                safetyBackupName = safetyResult.backupName;
+            } catch (safetyError) {
+                console.error('Error creando backup de seguridad:', safetyError);
+                // Continuar sin backup de seguridad pero avisar
+            }
         }
 
         // Restaurar cada modelo
