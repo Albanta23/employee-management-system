@@ -1220,6 +1220,55 @@ async function createMongoBackup(options = {}) {
     };
 }
 
+// GET /api/settings/backups/debug - Diagnóstico del sistema de backups
+router.get('/backups/debug', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const info = {
+            BACKUP_DIR_env: process.env.BACKUP_DIR || '(no definida)',
+            BACKUP_DIR_used: BACKUP_DIR,
+            cwd: process.cwd(),
+            __dirname: __dirname,
+            dir_exists: fs.existsSync(BACKUP_DIR),
+            parent_exists: fs.existsSync(path.dirname(BACKUP_DIR)),
+            app_backups_exists: fs.existsSync('/app/backups'),
+            app_backups_mongo_exists: fs.existsSync('/app/backups/mongo'),
+        };
+
+        // Intentar listar contenido
+        try {
+            if (fs.existsSync('/app/backups')) {
+                info.app_backups_contents = fs.readdirSync('/app/backups');
+            }
+        } catch (e) {
+            info.app_backups_error = e.message;
+        }
+
+        try {
+            if (fs.existsSync(BACKUP_DIR)) {
+                info.backup_dir_contents = fs.readdirSync(BACKUP_DIR);
+            }
+        } catch (e) {
+            info.backup_dir_error = e.message;
+        }
+
+        // Verificar permisos escribiendo un archivo de prueba
+        try {
+            const testFile = path.join(BACKUP_DIR, '.write-test');
+            ensureDir(BACKUP_DIR);
+            fs.writeFileSync(testFile, 'test');
+            fs.unlinkSync(testFile);
+            info.write_permission = true;
+        } catch (e) {
+            info.write_permission = false;
+            info.write_error = e.message;
+        }
+
+        res.json(info);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // GET /api/settings/backups - Listar backups disponibles
 router.get('/backups', authenticateToken, isAdmin, async (req, res) => {
     try {
