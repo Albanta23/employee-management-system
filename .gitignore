@@ -52,6 +52,7 @@ DEPLOY_GUIDE_COOLIFY.md
 # Scripts locales de diagnóstico (no subir)
 scripts/diagnose-employee-conflict.js
 scripts/find-orphan-users.js
+scripts/migrate-test-to-recursos-humanos.js
 
 # Android (local machine paths)
 android/local.properties

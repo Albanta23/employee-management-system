@@ -1075,4 +1075,332 @@ router.get('/maintenance/vacation-allocation-status', authenticateToken, async (
     }
 });
 
+// =====================================================
+// BACKUP SYSTEM ENDPOINTS
+// =====================================================
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', '..', 'backups', 'mongo');
+
+// GET /api/settings/backups - Listar backups disponibles
+router.get('/backups', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const backupDir = BACKUP_DIR;
+        
+        if (!fs.existsSync(backupDir)) {
+            return res.json({ backups: [], total: 0 });
+        }
+
+        const folders = fs.readdirSync(backupDir, { withFileTypes: true })
+            .filter(d => d.isDirectory())
+            .map(d => {
+                const manifestPath = path.join(backupDir, d.name, 'manifest.json');
+                let manifest = null;
+                let size = 0;
+
+                try {
+                    if (fs.existsSync(manifestPath)) {
+                        manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+                    }
+                    
+                    // Calcular tamaño total
+                    const files = fs.readdirSync(path.join(backupDir, d.name));
+                    for (const file of files) {
+                        const stat = fs.statSync(path.join(backupDir, d.name, file));
+                        size += stat.size;
+                    }
+                } catch (e) {
+                    console.error(`Error leyendo backup ${d.name}:`, e.message);
+                }
+
+                return {
+                    name: d.name,
+                    created_at: manifest?.createdAt || null,
+                    models_count: manifest?.models?.length || 0,
+                    models: manifest?.models || [],
+                    size_bytes: size,
+                    size_mb: (size / (1024 * 1024)).toFixed(2),
+                    has_checksums: fs.existsSync(path.join(backupDir, d.name, 'checksums.json'))
+                };
+            })
+            .sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+
+        res.json({
+            backups: folders,
+            total: folders.length,
+            backup_dir: backupDir
+        });
+
+    } catch (error) {
+        console.error('Error listando backups:', error);
+        res.status(500).json({ error: 'Error al listar backups' });
+    }
+});
+
+// POST /api/settings/backups/create - Crear nuevo backup
+router.post('/backups/create', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const { verify = true } = req.body;
+
+        // Ejecutar el script de backup como proceso hijo
+        const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'backup.js');
+        
+        const args = ['--type=mongo'];
+        if (verify) args.push('--verify=true');
+
+        const child = spawn('node', [scriptPath, ...args], {
+            cwd: path.join(__dirname, '..', '..'),
+            env: { ...process.env }
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        child.on('close', async (code) => {
+            if (code !== 0) {
+                console.error('Backup failed:', stderr || stdout);
+                return res.status(500).json({ 
+                    error: 'Error al crear backup',
+                    details: stderr || stdout
+                });
+            }
+
+            // Obtener el backup más reciente
+            const backupDir = BACKUP_DIR;
+            if (!fs.existsSync(backupDir)) {
+                return res.status(500).json({ error: 'No se encontró la carpeta de backups' });
+            }
+
+            const folders = fs.readdirSync(backupDir, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => d.name)
+                .sort()
+                .reverse();
+
+            const latestBackup = folders[0] || null;
+
+            // Log de auditoría
+            await logAudit({
+                action: 'backup_created',
+                user_id: req.user.id,
+                user_name: req.user.username,
+                entity_type: 'system',
+                entity_id: 'backup',
+                changes: { backup_name: latestBackup, verify }
+            });
+
+            res.json({
+                success: true,
+                message: 'Backup creado correctamente',
+                backup_name: latestBackup
+            });
+        });
+
+        child.on('error', (err) => {
+            console.error('Error spawning backup process:', err);
+            res.status(500).json({ error: 'Error al ejecutar el script de backup' });
+        });
+
+    } catch (error) {
+        console.error('Error creando backup:', error);
+        res.status(500).json({ error: 'Error al crear backup' });
+    }
+});
+
+// GET /api/settings/backups/:name/download - Descargar un backup como ZIP
+router.get('/backups/:name/download', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const { name } = req.params;
+        const backupPath = path.join(BACKUP_DIR, name);
+
+        if (!fs.existsSync(backupPath)) {
+            return res.status(404).json({ error: 'Backup no encontrado' });
+        }
+
+        // Crear un archivo tar.gz en memoria
+        const archiver = require('archiver');
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        res.attachment(`backup-${name}.zip`);
+        archive.pipe(res);
+        archive.directory(backupPath, name);
+        await archive.finalize();
+
+        // Log de auditoría
+        await logAudit({
+            action: 'backup_downloaded',
+            user_id: req.user.id,
+            user_name: req.user.username,
+            entity_type: 'system',
+            entity_id: 'backup',
+            changes: { backup_name: name }
+        });
+
+    } catch (error) {
+        console.error('Error descargando backup:', error);
+        res.status(500).json({ error: 'Error al descargar backup' });
+    }
+});
+
+// DELETE /api/settings/backups/:name - Eliminar un backup
+router.delete('/backups/:name', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const { name } = req.params;
+        const backupPath = path.join(BACKUP_DIR, name);
+
+        if (!fs.existsSync(backupPath)) {
+            return res.status(404).json({ error: 'Backup no encontrado' });
+        }
+
+        // Eliminar recursivamente
+        fs.rmSync(backupPath, { recursive: true, force: true });
+
+        // Log de auditoría
+        await logAudit({
+            action: 'backup_deleted',
+            user_id: req.user.id,
+            user_name: req.user.username,
+            entity_type: 'system',
+            entity_id: 'backup',
+            changes: { backup_name: name }
+        });
+
+        res.json({ success: true, message: 'Backup eliminado correctamente' });
+
+    } catch (error) {
+        console.error('Error eliminando backup:', error);
+        res.status(500).json({ error: 'Error al eliminar backup' });
+    }
+});
+
+// POST /api/settings/backups/:name/restore - Restaurar un backup
+router.post('/backups/:name/restore', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const { name } = req.params;
+        const { create_safety_backup = true } = req.body;
+        const backupPath = path.join(BACKUP_DIR, name);
+
+        if (!fs.existsSync(backupPath)) {
+            return res.status(404).json({ error: 'Backup no encontrado' });
+        }
+
+        const manifestPath = path.join(backupPath, 'manifest.json');
+        if (!fs.existsSync(manifestPath)) {
+            return res.status(400).json({ error: 'Backup inválido: falta manifest.json' });
+        }
+
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        const mongoose = require('mongoose');
+
+        // Crear backup de seguridad antes de restaurar
+        let safetyBackupName = null;
+        if (create_safety_backup) {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, 'Z');
+            safetyBackupName = `safety-before-restore-${timestamp}`;
+            
+            // Ejecutar backup de seguridad
+            const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'backup.js');
+            await new Promise((resolve, reject) => {
+                const child = spawn('node', [scriptPath, '--type=mongo'], {
+                    cwd: path.join(__dirname, '..', '..'),
+                    env: { ...process.env }
+                });
+                child.on('close', (code) => {
+                    if (code !== 0) reject(new Error('Safety backup failed'));
+                    else resolve();
+                });
+                child.on('error', reject);
+            });
+        }
+
+        // Restaurar cada modelo
+        const results = {
+            models_restored: 0,
+            documents_restored: 0,
+            details: []
+        };
+
+        for (const modelInfo of (manifest.models || [])) {
+            const modelName = modelInfo.name;
+            const filePath = path.join(backupPath, `${modelName}.jsonl`);
+
+            if (!fs.existsSync(filePath)) {
+                results.details.push({ model: modelName, status: 'skipped', reason: 'file not found' });
+                continue;
+            }
+
+            try {
+                // Cargar modelo si no está registrado
+                try {
+                    mongoose.model(modelName);
+                } catch (e) {
+                    // Modelo no registrado, intentar cargarlo
+                    const modelPath = path.join(__dirname, '..', 'models', `${modelName}.js`);
+                    if (fs.existsSync(modelPath)) {
+                        require(modelPath);
+                    }
+                }
+
+                const Model = mongoose.model(modelName);
+                
+                // Leer documentos del archivo JSONL
+                const content = fs.readFileSync(filePath, 'utf8');
+                const lines = content.trim().split('\n').filter(l => l.trim());
+                const docs = lines.map(l => JSON.parse(l));
+
+                // Borrar datos existentes y restaurar
+                await Model.deleteMany({});
+                if (docs.length > 0) {
+                    await Model.insertMany(docs, { ordered: false });
+                }
+
+                results.models_restored++;
+                results.documents_restored += docs.length;
+                results.details.push({ model: modelName, status: 'restored', documents: docs.length });
+
+            } catch (modelError) {
+                console.error(`Error restaurando modelo ${modelName}:`, modelError);
+                results.details.push({ model: modelName, status: 'error', error: modelError.message });
+            }
+        }
+
+        // Log de auditoría
+        await logAudit({
+            action: 'backup_restored',
+            user_id: req.user.id,
+            user_name: req.user.username,
+            entity_type: 'system',
+            entity_id: 'backup',
+            changes: { 
+                backup_name: name,
+                safety_backup: safetyBackupName,
+                models_restored: results.models_restored,
+                documents_restored: results.documents_restored
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Backup restaurado correctamente',
+            safety_backup: safetyBackupName,
+            results
+        });
+
+    } catch (error) {
+        console.error('Error restaurando backup:', error);
+        res.status(500).json({ error: 'Error al restaurar backup' });
+    }
+});
+
 module.exports = router;

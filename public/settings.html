@@ -408,6 +408,48 @@
                     <div id="allocationResult" style="margin-top: 1rem; padding: 1rem; border-radius: var(--radius-md); display: none;"></div>
                 </div>
             </div>
+
+            <!-- Sistema de Backup -->
+            <div class="settings-section" id="backupSection">
+                <h2 style="margin-bottom: 1.5rem; color: var(--primary-light);">💾 Sistema de Backup</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+                    Gestiona las copias de seguridad de la base de datos. Los backups incluyen todos los datos: empleados, asistencias, vacaciones, etc.
+                </p>
+
+                <!-- Crear Backup -->
+                <div style="background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: var(--radius-md); margin-bottom: 1.5rem;">
+                    <h3 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--text);">
+                        📦 Crear nuevo backup
+                    </h3>
+                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                        <label class="form-label" style="display:flex; align-items:center; gap: .5rem; margin: 0;">
+                            <input type="checkbox" id="backupVerify" checked> Verificar integridad (checksums)
+                        </label>
+                        <button onclick="createBackup()" class="btn btn-primary" id="btnCreateBackup">
+                            💾 Crear Backup Ahora
+                        </button>
+                    </div>
+                    <div id="backupCreateResult" style="margin-top: 1rem; display: none;"></div>
+                </div>
+
+                <!-- Lista de Backups -->
+                <div style="background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: var(--radius-md);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="margin: 0; font-size: 1rem; color: var(--text);">
+                            📋 Backups disponibles
+                        </h3>
+                        <button onclick="loadBackups()" class="btn btn-secondary btn-sm" style="padding: 0.5rem 1rem;">
+                            🔄 Refrescar
+                        </button>
+                    </div>
+                    
+                    <div id="backupsList" style="max-height: 400px; overflow-y: auto;">
+                        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">
+                            Cargando backups...
+                        </p>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -869,6 +911,7 @@
                 hideElementById('coordinatorSection');
                 hideElementById('vacationPolicySection');
                 hideElementById('maintenanceSection');
+                hideElementById('backupSection');
                 await loadOverlapRuleTargets();
                 await loadOverlapRules();
                 return;
@@ -880,6 +923,7 @@
             await loadOverlapRuleTargets();
             await loadOverlapRules();
             await loadVacationPolicy();
+            loadBackups();
         })();
 
         // =====================================================
@@ -1013,6 +1057,232 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = originalText;
+            }
+        }
+
+        // =====================================================
+        // SISTEMA DE BACKUP
+        // =====================================================
+
+        async function loadBackups() {
+            const container = document.getElementById('backupsList');
+            container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">Cargando...</p>';
+
+            try {
+                const response = await callAPI(`${API_URL}/settings/backups`);
+                
+                if (!response || !response.backups) {
+                    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem;">Error al cargar backups</p>';
+                    return;
+                }
+
+                if (response.backups.length === 0) {
+                    container.innerHTML = `
+                        <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                            <p style="font-size: 2rem; margin-bottom: 0.5rem;">📭</p>
+                            <p>No hay backups disponibles</p>
+                            <p style="font-size: 0.85rem;">Crea tu primer backup usando el botón de arriba</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                for (const backup of response.backups) {
+                    const date = backup.created_at ? new Date(backup.created_at).toLocaleString('es-ES') : 'Fecha desconocida';
+                    const isSafety = backup.name.includes('safety');
+                    
+                    html += `
+                        <div style="background: rgba(255,255,255,0.03); padding: 1rem; border-radius: var(--radius-md); margin-bottom: 0.75rem; border-left: 3px solid ${isSafety ? '#f59e0b' : 'var(--primary)'};">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+                                <div style="flex: 1; min-width: 200px;">
+                                    <div style="font-weight: 600; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                        ${isSafety ? '🛡️' : '💾'} ${backup.name}
+                                        ${backup.has_checksums ? '<span style="font-size: 0.7rem; background: var(--success); color: white; padding: 0.1rem 0.4rem; border-radius: 4px;">✓ Verificado</span>' : ''}
+                                    </div>
+                                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                                        📅 ${date}<br>
+                                        📊 ${backup.models_count} colecciones | ${backup.size_mb} MB
+                                    </div>
+                                    ${backup.models && backup.models.length > 0 ? `
+                                        <details style="margin-top: 0.5rem;">
+                                            <summary style="cursor: pointer; font-size: 0.8rem; color: var(--primary-light);">Ver colecciones</summary>
+                                            <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);">
+                                                ${backup.models.map(m => `${m.name}: ${m.count} docs`).join('<br>')}
+                                            </div>
+                                        </details>
+                                    ` : ''}
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                    <button onclick="downloadBackup('${backup.name}')" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.75rem;" title="Descargar">
+                                        ⬇️ Descargar
+                                    </button>
+                                    <button onclick="restoreBackup('${backup.name}')" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.75rem; border-color: var(--warning); color: var(--warning);" title="Restaurar">
+                                        🔄 Restaurar
+                                    </button>
+                                    <button onclick="deleteBackup('${backup.name}')" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.75rem; border-color: var(--danger); color: var(--danger);" title="Eliminar">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('Error cargando backups:', error);
+                container.innerHTML = '<p style="color: var(--danger); text-align: center; padding: 2rem;">Error al cargar backups</p>';
+            }
+        }
+
+        async function createBackup() {
+            const btn = document.getElementById('btnCreateBackup');
+            const resultDiv = document.getElementById('backupCreateResult');
+            const verify = document.getElementById('backupVerify').checked;
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Creando backup...';
+            resultDiv.style.display = 'none';
+
+            try {
+                const response = await callAPI(`${API_URL}/settings/backups/create`, {
+                    method: 'POST',
+                    body: JSON.stringify({ verify })
+                });
+
+                if (response && response.success) {
+                    resultDiv.style.display = 'block';
+                    resultDiv.style.background = 'rgba(34, 197, 94, 0.1)';
+                    resultDiv.style.padding = '1rem';
+                    resultDiv.style.borderRadius = 'var(--radius-md)';
+                    resultDiv.style.borderLeft = '3px solid var(--success)';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Backup creado correctamente</strong><br>
+                        <span style="font-size: 0.9rem; color: var(--text-muted);">Nombre: ${response.backup_name}</span>
+                    `;
+                    showAlert('Backup creado correctamente', 'success');
+                    
+                    // Refrescar lista
+                    await loadBackups();
+                } else {
+                    throw new Error(response?.error || 'Error desconocido');
+                }
+
+            } catch (error) {
+                console.error('Error creando backup:', error);
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = 'rgba(239, 68, 68, 0.1)';
+                resultDiv.style.padding = '1rem';
+                resultDiv.style.borderRadius = 'var(--radius-md)';
+                resultDiv.style.borderLeft = '3px solid var(--danger)';
+                resultDiv.innerHTML = `<strong>❌ Error al crear backup</strong><br><span style="font-size: 0.9rem;">${error.message || 'Error desconocido'}</span>`;
+                showAlert('Error al crear backup', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '💾 Crear Backup Ahora';
+            }
+        }
+
+        async function downloadBackup(name) {
+            try {
+                showAlert('Preparando descarga...', 'info');
+                
+                // Usar fetch directamente para manejar blob
+                const token = localStorage.getItem('token');
+                const response = await fetch(`${API_URL}/settings/backups/${encodeURIComponent(name)}/download`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Error al descargar');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup-${name}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+
+                showAlert('Descarga iniciada', 'success');
+            } catch (error) {
+                console.error('Error descargando backup:', error);
+                showAlert('Error al descargar backup', 'error');
+            }
+        }
+
+        async function restoreBackup(name) {
+            const confirmMsg = `⚠️ ATENCIÓN: Restaurar este backup reemplazará TODOS los datos actuales.\n\nSe creará un backup de seguridad automáticamente antes de restaurar.\n\nBackup a restaurar: ${name}\n\n¿Estás seguro de que deseas continuar?`;
+            
+            if (!confirm(confirmMsg)) return;
+
+            const confirmFinal = prompt('Para confirmar, escribe RESTAURAR:');
+            if (confirmFinal !== 'RESTAURAR') {
+                showAlert('Restauración cancelada', 'info');
+                return;
+            }
+
+            try {
+                showAlert('Restaurando backup... esto puede tardar unos segundos', 'info');
+
+                const response = await callAPI(`${API_URL}/settings/backups/${encodeURIComponent(name)}/restore`, {
+                    method: 'POST',
+                    body: JSON.stringify({ create_safety_backup: true })
+                });
+
+                if (response && response.success) {
+                    let msg = `✅ Backup restaurado correctamente\n\nModelos restaurados: ${response.results.models_restored}\nDocumentos restaurados: ${response.results.documents_restored}`;
+                    
+                    if (response.safety_backup) {
+                        msg += `\n\nBackup de seguridad creado: ${response.safety_backup}`;
+                    }
+
+                    alert(msg);
+                    showAlert('Backup restaurado correctamente', 'success');
+                    
+                    // Refrescar lista y recargar página
+                    await loadBackups();
+                    
+                    if (confirm('Se recomienda recargar la página para ver los cambios. ¿Recargar ahora?')) {
+                        window.location.reload();
+                    }
+                } else {
+                    throw new Error(response?.error || 'Error desconocido');
+                }
+
+            } catch (error) {
+                console.error('Error restaurando backup:', error);
+                showAlert('Error al restaurar backup: ' + (error.message || 'Error desconocido'), 'error');
+            }
+        }
+
+        async function deleteBackup(name) {
+            if (!confirm(`¿Estás seguro de que deseas eliminar el backup "${name}"?\n\nEsta acción no se puede deshacer.`)) {
+                return;
+            }
+
+            try {
+                const response = await callAPI(`${API_URL}/settings/backups/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response && response.success) {
+                    showAlert('Backup eliminado correctamente', 'success');
+                    await loadBackups();
+                } else {
+                    throw new Error(response?.error || 'Error desconocido');
+                }
+
+            } catch (error) {
+                console.error('Error eliminando backup:', error);
+                showAlert('Error al eliminar backup', 'error');
             }
         }
     </script>

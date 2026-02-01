@@ -22,8 +22,7 @@
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android",
     "android:apk": "npx cap sync android && cd android && (if exist gradlew.bat (gradlew.bat assembleDebug) else (./gradlew assembleDebug))",
-    "android:aab": "npx cap sync android && cd android && (if exist gradlew.bat (gradlew.bat bundleRelease) else (./gradlew bundleRelease))"
-    ,
+    "android:aab": "npx cap sync android && cd android && (if exist gradlew.bat (gradlew.bat bundleRelease) else (./gradlew bundleRelease))",
     "generate:portal-empleado-pdf": "node scripts/generate-portal-empleado-pdf.js",
     "vacation:rollover": "node scripts/rollover-vacation-carryover.js",
     "vacation:rollover:schedule": "node scripts/vacation-rollover-scheduler.js"
@@ -42,6 +41,7 @@
     "@capacitor/filesystem": "^8.0.0",
     "@capacitor/share": "^8.0.0",
     "@capgo/capacitor-native-biometric": "^8.0.3",
+    "archiver": "^7.0.1",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
