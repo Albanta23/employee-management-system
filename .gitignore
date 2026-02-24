@@ -42,6 +42,7 @@ desktop.ini
 tmp/
 temp/
 .cache/
+tmpclaude-*
 
 # Excel temporal
 ~$*.xlsx

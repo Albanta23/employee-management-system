@@ -283,6 +283,54 @@
             display: block;
             filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.5));
         }
+
+        /* ── Print: solo muestra el área del horario ──────────────────── */
+        @media print {
+            body > * { display: none !important; }
+            #horario-modal { display: block !important; position: static !important;
+                overflow: visible !important; background: white !important; }
+            #horario-modal > div { max-height: none !important; overflow: visible !important;
+                box-shadow: none !important; border: none !important;
+                background: white !important; color: #111 !important; }
+            .no-print { display: none !important; }
+            #hm-month-label { display: none !important; }
+            #hm-month-label-print { display: block !important; }
+            #hm-pdf-summary { display: block !important; margin-top: 1.5rem !important; }
+            #hm-employee-name { color: #4338ca !important; }
+
+            /* Calendario: fondo blanco, bordes grises, texto oscuro */
+            #hm-cal-grid > div {
+                background: white !important;
+                border-color: #d1d5db !important;
+                box-shadow: none !important;
+            }
+            #hm-cal-grid > div > div:first-child {
+                color: #374151 !important;
+            }
+            /* Chips dentro de los días */
+            #hm-cal-grid > div > div + div {
+                background: #e0e7ff !important;
+                color: #3730a3 !important;
+                text-decoration: none !important;
+            }
+            /* Domingo/festivo: gris muy claro */
+            #hm-cal-grid > div[style*="opacity:0.3"] {
+                background: #f9fafb !important;
+                opacity: 1 !important;
+            }
+            /* Today ring */
+            #hm-cal-grid > div[style*="var(--primary)"] {
+                border-color: #4f46e5 !important;
+            }
+            /* Stats cards */
+            #hm-stats > div {
+                background: #f8fafc !important;
+                border-color: #e2e8f0 !important;
+            }
+            #hm-stats > div > div { color: #334155 !important; }
+            #hm-title { color: #111 !important; }
+            #hm-subtitle { color: #555 !important; }
+        }
     </style>
 </head>
 
@@ -313,11 +361,38 @@
             <p style="color: var(--text-muted); margin: 0;">Hola,</p>
             <h1 id="user-name">Cargando...</h1>
         </div>
-        <a href="employee-profile.html" style="text-decoration: none;">
-            <img id="header-avatar"
-                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E"
-                style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.1); background: rgba(30,41,59,0.5);">
-        </a>
+        <div style="display:flex; align-items:center; gap:0.75rem; position:relative;">
+            <!-- Campana de notificaciones -->
+            <div id="notif-bell" style="position:relative; cursor:pointer; width:40px; height:40px;
+                border-radius:50%; background:rgba(255,255,255,0.05);
+                display:flex; align-items:center; justify-content:center;
+                border:1px solid rgba(255,255,255,0.08);" onclick="toggleNotifDropdown()">
+                <span style="font-size:1.25rem; line-height:1;">🔔</span>
+                <span id="notif-badge" style="display:none; position:absolute; top:-2px; right:-2px;
+                    background:#ef4444; color:white; font-size:0.6rem; font-weight:700;
+                    min-width:16px; height:16px; border-radius:99px; padding:0 3px;
+                    align-items:center; justify-content:center; line-height:1;">0</span>
+            </div>
+            <!-- Dropdown notificaciones -->
+            <div id="notif-dropdown" style="display:none; position:absolute; top:52px; right:0;
+                background:#1e293b; border:1px solid rgba(255,255,255,0.1); border-radius:12px;
+                width:300px; z-index:300; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.4);">
+                <div style="padding:0.75rem 1rem; border-bottom:1px solid rgba(255,255,255,0.08);
+                    display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="font-size:0.875rem;">Notificaciones</strong>
+                    <button onclick="markAllNotifsRead()" style="background:none; border:none;
+                        color:var(--primary-light); font-size:0.75rem; cursor:pointer; padding:0;">
+                        Marcar leídas
+                    </button>
+                </div>
+                <div id="notif-list" style="max-height:280px; overflow-y:auto;"></div>
+            </div>
+            <a href="employee-profile.html" style="text-decoration: none;">
+                <img id="header-avatar"
+                    src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E"
+                    style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255,255,255,0.1); background: rgba(30,41,59,0.5);">
+            </a>
+        </div>
     </header>
 
     <div class="clock-container">
@@ -329,6 +404,15 @@
 
         <div class="fichar-grid" id="fichar-controls">
             <!-- Cargado dinámicamente -->
+        </div>
+    </div>
+
+    <!-- ─── Mi Horario ──────────────────────────────────────────────── -->
+    <div id="mi-horario-section" style="display:none; margin: 0 1.5rem 1.5rem;">
+        <div style="font-size:1.125rem; font-weight:600; margin-bottom:0.75rem;">Mi Horario</div>
+        <div id="mi-horario-card" style="background:rgba(30,41,59,0.5); border:1px solid rgba(255,255,255,0.07);
+            border-radius:12px; padding:1.25rem;">
+            <div style="text-align:center; color:var(--text-muted); font-size:0.875rem;">Cargando...</div>
         </div>
     </div>
 
@@ -678,7 +762,470 @@
         }
 
         loadStatus();
+
+        // ─── Horario modal state (declarado antes de loadMiHorario) ──────
+        let hmShiftId      = null;
+        let hmEmployeeName = '';
+        let hmYear    = new Date().getFullYear();
+        let hmMonth   = new Date().getMonth();
+
+        // ─── Mi Horario ──────────────────────────────────────────────────
+        async function loadMiHorario() {
+            try {
+                const empData = await employeesAPI.getMe();
+                if (!empData || !empData.shift_id) return;
+
+                const shiftId = empData.shift_id;
+                hmShiftId      = shiftId; // guardar para el modal
+                hmEmployeeName = empData.full_name || user.name || '';
+                const now     = new Date();
+                const month   = now.getMonth();
+                const year    = now.getFullYear();
+
+                const [shift, hoursData] = await Promise.all([
+                    fetch(`${API_URL}/shifts/${shiftId}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
+                    fetch(`${API_URL}/shifts/${shiftId}/hours?month=${month}&year=${year}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
+                ]);
+
+                if (!shift) return;
+
+                const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+                const satInfo = shift.openDays && shift.openDays.includes(6)
+                    ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Sábados: ${shift.satStart}–${shift.satEnd}</div>` : '';
+
+                let balanceHtml = '';
+                if (hoursData && hoursData.hours) {
+                    const h  = hoursData.hours;
+                    const sc = (h.scheduledMins / 60).toFixed(1);
+                    const tg = (h.targetMins    / 60).toFixed(1);
+                    const bl = h.balanceMins;
+                    const blColor = bl > 5 ? '#4ade80' : bl < -5 ? '#f87171' : '#4ade80';
+                    const blH  = Math.floor(Math.abs(bl) / 60);
+                    const blM  = Math.abs(bl) % 60;
+                    const blLabel = (bl < 0 ? '−' : '+') + (blM === 0 ? `${blH}h` : `${blH}h ${blM}min`);
+                    balanceHtml = `
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.5rem;
+                            margin-top:0.75rem; text-align:center; font-size:0.8rem;">
+                            <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:0.5rem;">
+                                <div style="color:var(--text-muted);">Programadas</div>
+                                <div style="font-weight:600; color:var(--primary-light);">${sc}h</div>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:0.5rem;">
+                                <div style="color:var(--text-muted);">Objetivo</div>
+                                <div style="font-weight:600;">${tg}h</div>
+                            </div>
+                            <div style="background:rgba(255,255,255,0.04); border-radius:8px; padding:0.5rem;">
+                                <div style="color:var(--text-muted);">Balance</div>
+                                <div style="font-weight:600; color:${blColor};">${blLabel}</div>
+                            </div>
+                        </div>`;
+                }
+
+                const card = document.getElementById('mi-horario-card');
+                card.style.cursor = 'pointer';
+                card.title = 'Pulsa para ver el calendario completo';
+                card.onclick = () => openHorarioModal(shiftId, year, month);
+                card.innerHTML = `
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+                        <div style="display:flex; align-items:center; gap:0.75rem;">
+                            <span style="display:inline-block; width:10px; height:10px; border-radius:50%;
+                                background:${shift.color || '#6366f1'}; flex-shrink:0;"></span>
+                            <strong>${shift.name}</strong>
+                            <span style="color:var(--text-muted); font-size:0.85rem;">${MONTHS[month]} ${year}</span>
+                        </div>
+                        <span style="font-size:0.72rem; color:var(--primary-light); white-space:nowrap;">📅 Ver calendario ›</span>
+                    </div>
+                    <div style="font-size:0.875rem; color:var(--text-secondary);">
+                        L–V: <strong>${shift.weekdayStart}–${shift.weekdayEnd}</strong>${satInfo}
+                    </div>
+                    ${balanceHtml}`;
+                document.getElementById('mi-horario-section').style.display = '';
+            } catch (e) { /* Sin turno asignado */ }
+        }
+        loadMiHorario();
+
+        // ─── Notificaciones ──────────────────────────────────────────────
+        let notifDropdownOpen = false;
+
+        async function loadNotifCount() {
+            try {
+                const res = await fetch(`${API_URL}/notifications/unread-count`, { headers: getAuthHeaders() });
+                if (!res.ok) return;
+                const data = await res.json();
+                const count = data.count || 0;
+                const badge = document.getElementById('notif-badge');
+                if (count > 0) {
+                    badge.textContent = count > 99 ? '99+' : count;
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            } catch (e) {}
+        }
+        loadNotifCount();
+        setInterval(loadNotifCount, 60000);
+
+        async function toggleNotifDropdown() {
+            const dropdown = document.getElementById('notif-dropdown');
+            notifDropdownOpen = !notifDropdownOpen;
+            dropdown.style.display = notifDropdownOpen ? 'block' : 'none';
+            if (notifDropdownOpen) await loadNotifList();
+        }
+
+        document.addEventListener('click', e => {
+            if (notifDropdownOpen && !e.target.closest('#notif-bell') && !e.target.closest('#notif-dropdown')) {
+                notifDropdownOpen = false;
+                document.getElementById('notif-dropdown').style.display = 'none';
+            }
+        });
+
+        async function loadNotifList() {
+            const list = document.getElementById('notif-list');
+            list.innerHTML = '<div style="padding:1rem; text-align:center; color:var(--text-muted); font-size:0.8rem;">Cargando...</div>';
+            try {
+                const res = await fetch(`${API_URL}/notifications?limit=10`, { headers: getAuthHeaders() });
+                if (!res.ok) { list.innerHTML = '<div style="padding:1rem; color:var(--text-muted); text-align:center; font-size:0.8rem;">Error al cargar</div>'; return; }
+                const data = await res.json();
+                const notifs = data.notifications || [];
+
+                if (notifs.length === 0) {
+                    list.innerHTML = '<div style="padding:1.5rem; text-align:center; color:var(--text-muted); font-size:0.85rem;">Sin notificaciones</div>';
+                    return;
+                }
+
+                const icons = {
+                    schedule_published:'📅', shift_assigned:'🗓️', shift_changed:'⚠️',
+                    shift_unassigned:'🔕', vacation_approved:'✅', vacation_rejected:'❌',
+                    permission_approved:'✅', permission_rejected:'❌',
+                };
+
+                list.innerHTML = notifs.map(n => {
+                    const scheduleTypes = new Set(['schedule_published','shift_assigned','shift_changed']);
+                    const onclick = scheduleTypes.has(n.type)
+                        ? `handleNotifClick('${n._id}', true)`
+                        : `handleNotifClick('${n._id}', false)`;
+                    return `
+                    <div onclick="${onclick}" style="padding:0.75rem 1rem; cursor:pointer;
+                        border-bottom:1px solid rgba(255,255,255,0.04);
+                        background:${n.read ? 'transparent' : 'rgba(99,102,241,0.08)'};">
+                        <div style="display:flex; gap:0.75rem; align-items:flex-start;">
+                            <span style="font-size:1.1rem; flex-shrink:0;">${icons[n.type] || '🔔'}</span>
+                            <div style="flex:1; min-width:0;">
+                                <div style="font-size:0.8rem; font-weight:${n.read ? '400' : '600'};
+                                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n.title}</div>
+                                <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;
+                                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n.body}</div>
+                            </div>
+                            ${!n.read ? '<span style="width:7px; height:7px; border-radius:50%; background:#6366f1; flex-shrink:0; margin-top:4px;"></span>' : ''}
+                        </div>
+                    </div>`;
+                }).join('') +
+                    '<div style="padding:0.5rem; text-align:center;"><a href="employee-vacations.html" style="font-size:0.75rem; color:var(--primary-light); text-decoration:none;">Ver todas</a></div>';
+            } catch(e) {
+                list.innerHTML = '<div style="padding:1rem; color:var(--text-muted); text-align:center; font-size:0.8rem;">Error al cargar</div>';
+            }
+        }
+
+        async function markNotifRead(id) {
+            try {
+                await fetch(`${API_URL}/notifications/${id}/read`, { method:'PUT', headers: getAuthHeaders() });
+                loadNotifList(); loadNotifCount();
+            } catch(e) {}
+        }
+
+        async function markAllNotifsRead() {
+            try {
+                await fetch(`${API_URL}/notifications/read-all`, { method:'PUT', headers: getAuthHeaders() });
+                loadNotifList(); loadNotifCount();
+            } catch(e) {}
+        }
+
+        // ─── handleNotifClick ─────────────────────────────────────────────
+        async function handleNotifClick(id, openSchedule) {
+            try {
+                await fetch(`${API_URL}/notifications/${id}/read`, { method:'PUT', headers: getAuthHeaders() });
+                loadNotifCount();
+                // Cerrar dropdown
+                notifDropdownOpen = false;
+                document.getElementById('notif-dropdown').style.display = 'none';
+            } catch(e) {}
+            if (openSchedule && hmShiftId) {
+                openHorarioModal(hmShiftId);
+            } else {
+                loadNotifList();
+            }
+        }
+
+        // ─── Modal: Horario Completo ──────────────────────────────────────
+        const MONTHS_ES_HM = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                              'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        // (hmShiftId / hmYear / hmMonth declarados más arriba)
+
+        async function openHorarioModal(shiftId, year, month) {
+            if (shiftId) hmShiftId = shiftId;
+            hmYear  = (year  != null) ? year  : new Date().getFullYear();
+            hmMonth = (month != null) ? month : new Date().getMonth();
+            document.getElementById('horario-modal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+            await renderHmMonth();
+        }
+
+        function closeHorarioModal() {
+            document.getElementById('horario-modal').style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        async function hmPrevMonth() {
+            hmMonth--;
+            if (hmMonth < 0) { hmMonth = 11; hmYear--; }
+            await renderHmMonth();
+        }
+
+        async function hmNextMonth() {
+            hmMonth++;
+            if (hmMonth > 11) { hmMonth = 0; hmYear++; }
+            await renderHmMonth();
+        }
+
+        async function renderHmMonth() {
+            if (!hmShiftId) return;
+            const monthLabel = `${MONTHS_ES_HM[hmMonth]} ${hmYear}`;
+            document.getElementById('hm-month-label').textContent       = monthLabel;
+            document.getElementById('hm-month-label-print').textContent = monthLabel;
+            const grid = document.getElementById('hm-cal-grid');
+            grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-muted); padding:2rem; font-size:0.875rem;">Cargando...</div>';
+
+            const [calData, hoursData] = await Promise.all([
+                fetch(`${API_URL}/shifts/${hmShiftId}/calendar?month=${hmMonth}&year=${hmYear}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
+                fetch(`${API_URL}/shifts/${hmShiftId}/hours?month=${hmMonth}&year=${hmYear}`, { headers: getAuthHeaders() }).then(r => r.ok ? r.json() : null),
+            ]);
+
+            if (!calData) {
+                grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#f87171; padding:2rem;">Error al cargar el calendario</div>';
+                return;
+            }
+
+            const shift = calData.shift;
+            document.getElementById('hm-title').textContent = shift.name;
+            document.getElementById('hm-employee-name').textContent =
+                hmEmployeeName ? `Empleado: ${hmEmployeeName}` : '';
+            document.getElementById('hm-subtitle').textContent =
+                `L–V: ${shift.weekdayStart}–${shift.weekdayEnd}` +
+                (shift.openDays && shift.openDays.includes(6)
+                    ? `  ·  Sáb: ${shift.satStart}–${shift.satEnd}` : '');
+
+            // ── Stats ──────────────────────────────────────────────────
+            let pdfSummaryHtml = '';
+            if (hoursData && hoursData.hours) {
+                const h = hoursData.hours;
+                const sc  = (h.scheduledMins / 60).toFixed(1);
+                const tg  = (h.targetMins    / 60).toFixed(1);
+                const bl  = h.balanceMins;
+                const blColor = bl > 5 ? '#4ade80' : bl < -5 ? '#f87171' : '#4ade80';
+                const blH = Math.floor(Math.abs(bl) / 60);
+                const blM = Math.abs(bl) % 60;
+                const blLabel = (bl < 0 ? '−' : '+') + (blM === 0 ? `${blH}h` : `${blH}h ${blM}min`);
+                const pct = Math.min(100, Math.round((h.scheduledMins / Math.max(h.targetMins, 1)) * 100));
+
+                const dayH   = Math.floor(h.weekdayMins / 60);
+                const dayM   = h.weekdayMins % 60;
+                const dayLbl = dayM === 0 ? `${dayH}h` : `${dayH}h ${dayM}min`;
+                const satH   = Math.floor(h.satMins / 60);
+                const satM   = h.satMins % 60;
+                const satLbl = satM === 0 ? `${satH}h` : `${satH}h ${satM}min`;
+
+                document.getElementById('hm-stats').innerHTML = `
+                    <div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25);
+                        border-radius:10px; padding:0.75rem; text-align:center;">
+                        <div style="font-size:0.68rem; color:var(--text-muted); margin-bottom:0.2rem;">Programadas</div>
+                        <div style="font-size:1.15rem; font-weight:700; color:var(--primary-light);">${sc}h</div>
+                        <div style="font-size:0.63rem; color:var(--text-muted); margin-top:0.15rem;">${h.weekdayCount} días L–V</div>
+                    </div>
+                    <div style="background:rgba(30,41,59,0.6); border:1px solid rgba(255,255,255,0.06);
+                        border-radius:10px; padding:0.75rem; text-align:center;">
+                        <div style="font-size:0.68rem; color:var(--text-muted); margin-bottom:0.2rem;">Objetivo</div>
+                        <div style="font-size:1.15rem; font-weight:700;">${tg}h</div>
+                        <div style="font-size:0.63rem; color:var(--text-muted); margin-top:0.15rem;">${pct}% cubierto</div>
+                    </div>
+                    <div style="background:rgba(30,41,59,0.6); border:1px solid rgba(255,255,255,0.06);
+                        border-radius:10px; padding:0.75rem; text-align:center;">
+                        <div style="font-size:0.68rem; color:var(--text-muted); margin-bottom:0.2rem;">Balance</div>
+                        <div style="font-size:1.15rem; font-weight:700; color:${blColor};">${blLabel}</div>
+                        <div style="font-size:0.63rem; color:var(--text-muted); margin-top:0.15rem;">${h.satWorked} sáb.trabajo · ${h.satOff} libres</div>
+                    </div>`;
+
+                // ── PDF summary ─────────────────────────────────────────
+                const satRow = h.satMins > 0 ? `
+                    <tr><td>Hora entrada sábados</td><td>${shift.satStart}</td></tr>
+                    <tr><td>Hora salida sábados</td><td>${shift.satEnd}</td></tr>
+                    <tr><td>Horas por sábado trabajado</td><td>${satLbl}</td></tr>
+                    <tr><td>Sábados trabajados</td><td>${h.satWorked}</td></tr>
+                    <tr><td>Sábados libres</td><td>${h.satOff}</td></tr>` : '';
+
+                pdfSummaryHtml = `
+                    <table style="width:100%; border-collapse:collapse; font-size:0.82rem; color:#111;">
+                        <tr style="background:#f1f5f9;">
+                            <th colspan="2" style="padding:6px 8px; text-align:left; font-size:0.9rem;">Resumen de horas — ${MONTHS_ES_HM[hmMonth]} ${hmYear}</th>
+                        </tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Empleado</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0; font-weight:600;">${hmEmployeeName}</td></tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Turno</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0; font-weight:600;">${shift.name}</td></tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Hora entrada L–V</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">${shift.weekdayStart}</td></tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Hora salida L–V</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">${shift.weekdayEnd}</td></tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Horas por día laboral</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">${dayLbl}</td></tr>
+                        <tr><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">Días laborales en el mes</td><td style="padding:4px 8px; border-bottom:1px solid #e2e8f0;">${h.weekdayCount}</td></tr>
+                        ${satRow}
+                        <tr style="background:#f1f5f9; font-weight:600;">
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">Objetivo semanal</td>
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">${shift.targetHoursWeek || 40}h / semana</td>
+                        </tr>
+                        <tr style="background:#f1f5f9; font-weight:600;">
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">Total programado mensual</td>
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">${sc}h</td>
+                        </tr>
+                        <tr style="background:#f1f5f9; font-weight:600;">
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">Objetivo mensual</td>
+                            <td style="padding:5px 8px; border-bottom:1px solid #e2e8f0;">${tg}h (${pct}% cubierto)</td>
+                        </tr>
+                        <tr style="background:${bl >= 0 ? '#f0fdf4' : '#fef2f2'}; font-weight:700;">
+                            <td style="padding:5px 8px;">Balance</td>
+                            <td style="padding:5px 8px;">${blLabel}</td>
+                        </tr>
+                    </table>`;
+            }
+            document.getElementById('hm-pdf-summary').innerHTML = pdfSummaryHtml;
+
+            // ── Calendar grid ───────────────────────────────────────────
+            const days   = calData.days;
+            const today  = new Date();
+            const hdrs   = ['L','M','X','J','V','S','D'];
+            let html = hdrs.map(h =>
+                `<div style="text-align:center; font-size:0.67rem; font-weight:600; color:var(--text-muted); padding:0.35rem 0; text-transform:uppercase;">${h}</div>`
+            ).join('');
+
+            const firstDow = new Date(hmYear, hmMonth, 1).getDay();
+            const offset   = firstDow === 0 ? 6 : firstDow - 1;
+            for (let i = 0; i < offset; i++) html += '<div></div>';
+
+            days.forEach(d => {
+                const isToday = today.getFullYear() === hmYear &&
+                                today.getMonth()    === hmMonth &&
+                                today.getDate()     === d.day;
+                let chip = '', extra = '';
+                if (d.type === 'workday') {
+                    chip  = `<div style="font-size:0.57rem; background:rgba(99,102,241,0.25); color:#a5b4fc; border-radius:3px; padding:1px 3px; text-align:center; font-weight:600; line-height:1.5;">${d.startTime}–${d.endTime}</div>`;
+                    extra = 'border-color:rgba(99,102,241,0.22);';
+                } else if (d.type === 'sat_work') {
+                    chip  = `<div style="font-size:0.57rem; background:rgba(139,92,246,0.25); color:#c4b5fd; border-radius:3px; padding:1px 3px; text-align:center; font-weight:600; line-height:1.5;">${d.startTime}–${d.endTime}</div>`;
+                    extra = 'border-color:rgba(139,92,246,0.22);';
+                } else if (d.type === 'sat_off') {
+                    chip  = `<div style="font-size:0.57rem; background:rgba(148,163,184,0.08); color:var(--text-muted); border-radius:3px; padding:1px 3px; text-align:center; text-decoration:line-through; line-height:1.5;">Libre</div>`;
+                } else {
+                    extra = 'opacity:0.3;';
+                }
+                const ring = isToday ? 'box-shadow:0 0 0 1.5px var(--primary); border-color:var(--primary) !important;' : '';
+                html += `<div style="min-height:52px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.13); border-radius:6px; padding:4px 3px; display:flex; flex-direction:column; gap:2px; ${extra} ${ring}">
+                    <div style="font-size:0.67rem; font-weight:600; color:${isToday ? 'var(--primary-light)' : 'var(--text-secondary)'};">${d.day}</div>
+                    ${chip}
+                </div>`;
+            });
+
+            grid.innerHTML = html;
+        }
+
+        function exportHorarioPDF() {
+            const summary    = document.getElementById('hm-pdf-summary');
+            const printLabel = document.getElementById('hm-month-label-print');
+            // Forzar visibilidad via JS (más fiable que CSS solo en algunos browsers)
+            summary.style.display    = 'block';
+            printLabel.style.display = 'block';
+            window.print();
+            summary.style.display    = 'none';
+            printLabel.style.display = 'none';
+        }
+
+        // Cerrar modal al pulsar el fondo oscuro
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('horario-modal').addEventListener('click', function(e) {
+                if (e.target === this) closeHorarioModal();
+            });
+        });
     </script>
+    <!-- ─── Modal: Horario Completo ────────────────────────────────── -->
+    <div id="horario-modal" style="display:none; position:fixed; inset:0; z-index:600;
+        background:rgba(0,0,0,0.75); overflow-y:auto; -webkit-overflow-scrolling:touch; padding:1rem;">
+        <div style="background:var(--bg-card); border:1px solid rgba(255,255,255,0.08);
+            border-radius:16px; margin:0 auto; max-width:520px; padding:1.5rem; position:relative;">
+
+            <!-- Cabecera -->
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+                <div>
+                    <h2 id="hm-title" style="margin:0; font-size:1.15rem;"></h2>
+                    <div id="hm-employee-name" style="font-size:0.78rem; color:var(--primary-light); margin-top:0.2rem; font-weight:500;"></div>
+                    <p id="hm-subtitle" style="margin:0.3rem 0 0; color:var(--text-muted); font-size:0.8rem;"></p>
+                </div>
+                <div style="display:flex; gap:0.5rem;" class="no-print">
+                    <button onclick="exportHorarioPDF()"
+                        style="background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3);
+                        color:#a5b4fc; border-radius:8px; padding:0.4rem 0.8rem;
+                        font-size:0.8rem; cursor:pointer; white-space:nowrap; font-family:inherit;">
+                        📄 PDF
+                    </button>
+                    <button onclick="closeHorarioModal()"
+                        style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+                        color:var(--text-muted); border-radius:8px; padding:0.4rem 0.8rem;
+                        font-size:1rem; cursor:pointer; line-height:1; font-family:inherit;">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div id="hm-stats" style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.6rem; margin-bottom:1.25rem;"></div>
+
+            <!-- Navegación de mes -->
+            <div class="no-print" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+                <button onclick="hmPrevMonth()"
+                    style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+                    color:var(--text-secondary); border-radius:8px; padding:0.4rem 1rem;
+                    font-size:1.1rem; cursor:pointer; line-height:1; font-family:inherit;">‹</button>
+                <span id="hm-month-label" style="font-size:1rem; font-weight:600;"></span>
+                <button onclick="hmNextMonth()"
+                    style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+                    color:var(--text-secondary); border-radius:8px; padding:0.4rem 1rem;
+                    font-size:1.1rem; cursor:pointer; line-height:1; font-family:inherit;">›</button>
+            </div>
+            <!-- Label solo para impresión -->
+            <div id="hm-month-label-print" style="display:none; font-size:1rem; font-weight:600; text-align:center; margin-bottom:0.75rem;"></div>
+
+            <!-- Cuadrícula del calendario -->
+            <div id="hm-cal-grid" style="display:grid; grid-template-columns:repeat(7,1fr); gap:3px;"></div>
+
+            <!-- Leyenda -->
+            <div class="no-print" style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.4rem 0.9rem; font-size:0.75rem; color:var(--text-muted);">
+                <span>
+                    <span style="display:inline-block; background:rgba(99,102,241,0.25); color:#a5b4fc;
+                        border-radius:3px; padding:0 5px; font-size:0.67rem; font-weight:600; vertical-align:middle;">08:00</span>
+                    Día laborable
+                </span>
+                <span>
+                    <span style="display:inline-block; background:rgba(139,92,246,0.25); color:#c4b5fd;
+                        border-radius:3px; padding:0 5px; font-size:0.67rem; font-weight:600; vertical-align:middle;">Sáb</span>
+                    Sábado trabajado
+                </span>
+                <span>
+                    <span style="display:inline-block; background:rgba(148,163,184,0.1); color:var(--text-muted);
+                        border-radius:3px; padding:0 5px; font-size:0.67rem; text-decoration:line-through; vertical-align:middle;">Libre</span>
+                    Sábado libre
+                </span>
+            </div>
+
+            <!-- Resumen horas: oculto en pantalla, visible solo en impresión PDF -->
+            <div id="hm-pdf-summary" style="display:none; margin-top:1.5rem;"></div>
+        </div>
+    </div>
+
 </body>
 
 </html>

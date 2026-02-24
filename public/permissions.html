@@ -26,6 +26,8 @@
             <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
             <li class="menu-item"><a href="permissions.html" class="menu-link active"><span>📄</span> Ausencias y
                     Permisos</a></li>
+            <li class="menu-item"><a href="turnos.html" class="menu-link"><span>ðŸ—“ï¸</span> Turnos</a></li>
+            <li class="menu-item"><a href="schedule-builder.html" class="menu-link"><span>📋</span> Cuadro Turnos</a></li>
             <li class="menu-item"><a href="settings.html" class="menu-link"><span>⚙️</span> Configuración</a></li>
         </ul>
         <div style="margin-top: auto; padding-top: var(--spacing-xl);">
@@ -283,8 +285,25 @@
             const result = await vacationsAPI.update(id, payload);
             if (result) {
                 showAlert(`Permiso ${status === 'approved' ? 'aprobado' : 'rechazado'}`, status === 'approved' ? 'success' : 'error');
+                if (result.warning) {
+                    showCoverageWarning(result.warning);
+                }
                 loadPermissions();
             }
+        }
+
+        function showCoverageWarning(msg) {
+            const existing = document.getElementById('coverageWarningBanner');
+            if (existing) existing.remove();
+            const banner = document.createElement('div');
+            banner.id = 'coverageWarningBanner';
+            banner.style.cssText = 'background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.4); color:#fbbf24; border-radius:8px; padding:12px 16px; margin-bottom:1rem; font-size:0.875rem; display:flex; gap:10px; align-items:flex-start;';
+            banner.innerHTML = `<span style="font-size:1.1rem;">⚠️</span><span>${msg}</span>`;
+            const alertContainer = document.getElementById('alert-container');
+            if (alertContainer) {
+                alertContainer.parentNode.insertBefore(banner, alertContainer.nextSibling);
+            }
+            setTimeout(() => banner.remove(), 12000);
         }
 
         async function showNewPermissionModal() {

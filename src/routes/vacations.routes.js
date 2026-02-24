@@ -3,9 +3,12 @@ const router = express.Router();
 const Vacation = require('../models/Vacation');
 const Employee = require('../models/Employee');
 const Absence = require('../models/Absence');
+const Shift = require('../models/Shift');
+const ShiftRotationPlan = require('../models/ShiftRotationPlan');
 const { authenticateToken } = require('../middleware/auth');
 const { requireFeatureAccess, ensureEmployeeInScope, isStoreCoordinator, getStoreLocations, getStoreEmployeeIds, getSettingsForAccess } = require('../utils/accessScope');
 const { logAudit, pick, shallowDiff } = require('../utils/audit');
+const { notifyVacationApproved, notifyVacationRejected } = require('../utils/notificationService');
 
 router.use(authenticateToken);
 
@@ -1444,6 +1447,20 @@ router.put('/:id', async (req, res) => {
 
         const vacation = await Vacation.findByIdAndUpdate(req.params.id, update, { new: true });
 
+        // Notificación in-app al empleado cuando cambia el estado
+        if (vacation && existing.status !== vacation.status) {
+            try {
+                const empForNotif = await Employee.findById(existing.employee_id).select('_id full_name').lean();
+                if (empForNotif) {
+                    if (vacation.status === 'approved') {
+                        await notifyVacationApproved(empForNotif, vacation);
+                    } else if (vacation.status === 'rejected') {
+                        await notifyVacationRejected(empForNotif, vacation);
+                    }
+                }
+            } catch (e) { /* notificación no crítica */ }
+        }
+
         const afterSnapshot = pick(vacation && vacation.toObject ? vacation.toObject() : vacation, ['_id', 'employee_id', 'type', 'vacation_year', 'status', 'start_date', 'end_date', 'days', 'allocation', 'reason', 'rejection_reason', 'cancellation_reason', 'revocation_reason']);
         const changed = shallowDiff(beforeSnapshot, afterSnapshot);
 
@@ -1468,7 +1485,65 @@ router.put('/:id', async (req, res) => {
             meta: { changed }
         });
 
-        res.json({ message: 'Solicitud actualizada correctamente', vacation });
+        // Verificar cobertura de turno tras aprobar (aviso no bloqueante)
+        let coverageWarning = null;
+        if (vacation && vacation.status === 'approved' && existing.status !== 'approved') {
+            try {
+                const empForCoverage = await Employee.findById(existing.employee_id).select('shift_id').lean();
+                if (empForCoverage && empForCoverage.shift_id) {
+                    const shiftForCoverage = await Shift.findById(empForCoverage.shift_id).lean();
+                    if (shiftForCoverage && shiftForCoverage.min_workers > 1) {
+                        const vStart = vacation.start_date;
+                        const vEnd   = vacation.end_date || vacation.start_date;
+
+                        // Contar empleados asignados al turno
+                        const allInShift = await Employee.find({
+                            shift_id: empForCoverage.shift_id,
+                            status: { $ne: 'inactive' }
+                        }).select('_id').lean();
+
+                        // Ausencias en ese período (incluyendo la que acaba de aprobarse)
+                        const absentV = await Vacation.find({
+                            employee_id: { $in: allInShift.map(e => e._id) },
+                            status: { $in: ['approved', 'pending'] },
+                            start_date: { $lte: vEnd },
+                            end_date:   { $gte: vStart }
+                        }).select('employee_id').lean();
+
+                        const absentA = await Absence.find({
+                            employee_id: { $in: allInShift.map(e => e._id) },
+                            status: 'active',
+                            start_date: { $lte: vEnd },
+                            $or: [{ end_date: { $gte: vStart } }, { end_date: null }, { end_date: { $exists: false } }]
+                        }).select('employee_id').lean();
+
+                        const absentIds = new Set([
+                            ...absentV.map(v => String(v.employee_id)),
+                            ...absentA.map(a => String(a.employee_id))
+                        ]);
+
+                        const rotatingIn = await ShiftRotationPlan.countDocuments({
+                            to_shift_id: empForCoverage.shift_id,
+                            week_start: { $lte: vEnd },
+                            week_end:   { $gte: vStart }
+                        });
+
+                        const rotatingOut = await ShiftRotationPlan.countDocuments({
+                            from_shift_id: empForCoverage.shift_id,
+                            week_start: { $lte: vEnd },
+                            week_end:   { $gte: vStart }
+                        });
+
+                        const available = allInShift.length - absentIds.size + rotatingIn - rotatingOut;
+                        if (available < shiftForCoverage.min_workers) {
+                            coverageWarning = `Aviso de cobertura: el turno "${shiftForCoverage.name}" quedaría con ${Math.max(0, available)} persona(s) disponible(s), por debajo del mínimo configurado de ${shiftForCoverage.min_workers}. Revisa el plan de rotación.`;
+                        }
+                    }
+                }
+            } catch (coverageErr) { /* no bloquear aprobación si falla la comprobación */ }
+        }
+
+        res.json({ message: 'Solicitud actualizada correctamente', vacation, warning: coverageWarning });
 
     } catch (error) {
         console.error('Error al actualizar solicitud:', error);

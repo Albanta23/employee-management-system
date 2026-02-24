@@ -18,6 +18,21 @@ const EmployeeSchema = new mongoose.Schema({
     salary: { type: Number },
     notes: { type: String },
 
+    // Turno colectivo asignado al empleado (opcional, compatible con work_schedule individual)
+    shift_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Shift',
+        default: null
+    },
+
+    // Empleado rotativo: puede cubrir un turno secundario además del principal
+    can_rotate: { type: Boolean, default: false },
+    secondary_shift_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Shift',
+        default: null
+    },
+
     // Horario de trabajo configurado por el empleado (portal empleado)
     // Se usa para validar si los fichajes se están realizando correctamente.
     work_schedule: {

@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cuadro de Turnos Mensual - Sistema de Gestión</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        /* ── Grid de turnos ─────────────────────────────────────────── */
+        .schedule-wrapper {
+            overflow-x: auto;
+            border-radius: 8px;
+            /* Necesario para que sticky funcione dentro del overflow */
+            position: relative;
+        }
+        .schedule-table {
+            border-collapse: collapse;
+            font-size: 0.78rem;
+            width: auto;          /* la tabla se expande a su tamaño natural */
+            white-space: nowrap;
+        }
+        .schedule-table th,
+        .schedule-table td {
+            border: 1px solid var(--border-color, #e5e7eb);
+            text-align: center;
+            padding: 0;
+            white-space: nowrap;
+        }
+        /* Columna sticky de nombre de empleado */
+        .schedule-table .col-name {
+            width: 160px;
+            min-width: 160px;
+            text-align: left;
+            padding: 4px 8px;
+            font-weight: 500;
+            position: sticky;
+            left: 0;
+            z-index: 2;
+            background: #fff;
+            /* Borde derecho para separar visualmente del scroll */
+            box-shadow: 2px 0 4px -2px rgba(0,0,0,0.12);
+        }
+        /* La celda cabecera de la columna nombre tiene z-index mayor
+           para que quede encima de todo al hacer scroll */
+        .schedule-table thead .col-name {
+            z-index: 4 !important;
+            background: #f9fafb !important;
+        }
+        /* Encabezado de día */
+        .schedule-table .day-header {
+            width: 38px;
+            min-width: 38px;
+            padding: 0;
+            vertical-align: bottom;
+        }
+        .day-header-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 4px 2px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .day-header-inner:hover { background: #f3f4f6; }
+        .day-num { font-weight: 600; font-size: 0.8rem; }
+        .day-dow { font-size: 0.68rem; color: #6b7280; }
+        .day-header.sunday .day-num,
+        .day-header.sunday .day-dow { color: #ef4444; }
+        .day-header.saturday .day-num  { color: #f97316; }
+        .day-header.closed-col .day-num,
+        .day-header.closed-col .day-dow { color: #9ca3af; }
+        .lock-icon { font-size: 0.65rem; }
+
+        /* Celdas de slot */
+        .schedule-table .slot-cell {
+            width: 38px;
+            min-width: 38px;
+            height: 32px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.78rem;
+            transition: filter 0.1s;
+        }
+        .schedule-table .slot-cell:hover { filter: brightness(0.88); }
+        .slot-M  { background: #4f46e5; color: #fff; }
+        .slot-T  { background: #ea580c; color: #fff; }
+        .slot-L  { background: #e5e7eb; color: #6b7280; }
+        .slot-V  { background: #7c3aed; color: #fff; cursor: default; }
+        .slot-B  { background: #dc2626; color: #fff; cursor: default; }
+        .slot-TC { background: #374151; color: #9ca3af; cursor: default; font-size: 0.65rem; } /* tarde cerrada */
+
+        /* Fila separadora de grupos */
+        .group-label-row td {
+            background: #f9fafb;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #6b7280;
+            padding: 3px 8px;
+            text-align: left;
+        }
+
+        /* Footer de cobertura */
+        .coverage-row td {
+            font-weight: 700;
+            font-size: 0.75rem;
+            padding: 4px 2px;
+        }
+        .coverage-row .col-name {
+            text-align: right;
+            font-size: 0.7rem;
+            color: #6b7280;
+        }
+        .cov-ok    { background: #d1fae5; color: #065f46; }
+        .cov-warn  { background: #fef3c7; color: #92400e; }
+        .cov-bad   { background: #fee2e2; color: #991b1b; }
+        .cov-closed { background: #e5e7eb; color: #9ca3af; }
+
+        /* Leyenda */
+        .legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .legend-item {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 0.8rem;
+        }
+        .legend-chip {
+            width: 24px; height: 20px; border-radius: 3px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.72rem; color: #fff;
+        }
+        .chip-M  { background: #4f46e5; }
+        .chip-T  { background: #ea580c; }
+        .chip-L  { background: #e5e7eb; color: #6b7280; }
+        .chip-V  { background: #7c3aed; }
+        .chip-B  { background: #dc2626; }
+        .chip-TC { background: #374151; color: #9ca3af; font-size: 0.63rem; }
+
+        /* Config row */
+        .config-row {
+            display: flex; flex-wrap: wrap; gap: var(--spacing-md);
+            align-items: flex-end;
+        }
+        .config-row .form-group { margin: 0; min-width: 120px; }
+        .config-row label { font-size: 0.8rem; }
+        .config-row input[type=number] { width: 70px; }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span>👥</span><span>Gestión RH</span>
+            </div>
+        </div>
+        <ul class="sidebar-menu">
+            <li class="menu-item"><a href="dashboard.html" class="menu-link"><span>📊</span> Dashboard</a></li>
+            <li class="menu-item"><a href="reports.html" class="menu-link"><span>📈</span> Reportes</a></li>
+            <li class="menu-item"><a href="employees.html" class="menu-link"><span>👤</span> Trabajadores</a></li>
+            <li class="menu-item"><a href="attendance-admin.html" class="menu-link"><span>🕒</span> Control Horario</a></li>
+            <li class="menu-item"><a href="vacations.html" class="menu-link"><span>🏖️</span> Vacaciones</a></li>
+            <li class="menu-item"><a href="absences.html" class="menu-link"><span>🏥</span> Bajas Médicas</a></li>
+            <li class="menu-item"><a href="permissions.html" class="menu-link"><span>📄</span> Ausencias y Permisos</a></li>
+            <li class="menu-item"><a href="turnos.html" class="menu-link"><span>🗓️</span> Turnos</a></li>
+            <li class="menu-item"><a href="schedule-builder.html" class="menu-link active"><span>📋</span> Cuadro Turnos</a></li>
+            <li class="menu-item"><a href="settings.html" class="menu-link"><span>⚙️</span> Configuración</a></li>
+        </ul>
+        <div style="margin-top: auto; padding-top: var(--spacing-xl);">
+            <button onclick="logout()" class="btn btn-secondary" style="width: 100%;">🚪 Cerrar Sesión</button>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div id="alert-container"></div>
+
+        <!-- HEADER CARD -->
+        <div class="card fade-in" style="margin-bottom: var(--spacing-xl);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:var(--spacing-md);">
+                <div>
+                    <h1 style="margin:0;">Cuadro de Turnos Mensual</h1>
+                    <p style="color:var(--text-muted); margin:0.5rem 0 0 0;">Asignación manual M/T/L por empleado y día</p>
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <button onclick="autoGenerate()" class="btn btn-secondary">⚡ Auto-generar</button>
+                    <button onclick="saveSchedule()" class="btn btn-primary">💾 Guardar</button>
+                    <button onclick="exportPDF()" class="btn btn-secondary">📤 PDF</button>
+                    <button onclick="deleteSchedule()" class="btn btn-secondary" style="color:#dc2626;" id="btnDelete" hidden>🗑️ Eliminar</button>
+                </div>
+            </div>
+
+            <div style="margin-top:var(--spacing-lg);">
+                <div class="config-row">
+                    <div class="form-group">
+                        <label class="form-label">Tienda</label>
+                        <select id="storeSelect" class="form-select" style="min-width:150px;" onchange="onStoreChange()">
+                            <option value="">Seleccionar tienda...</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:0;">
+                        <button onclick="prevMonth()" class="btn btn-secondary" style="padding:6px 10px;">◄</button>
+                        <strong id="monthLabel" style="min-width:140px; text-align:center; font-size:1rem;"></strong>
+                        <button onclick="nextMonth()" class="btn btn-secondary" style="padding:6px 10px;">►</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Mín. mañana</label>
+                        <input type="number" id="minMorning" class="form-control" min="0" value="5" style="width:70px;">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Mín. tarde</label>
+                        <input type="number" id="minAfternoon" class="form-control" min="0" value="3" style="width:70px;">
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:var(--spacing-md);">
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-chip chip-M">M</div><span>Mañana</span></div>
+                    <div class="legend-item"><div class="legend-chip chip-T">T</div><span>Tarde</span></div>
+                    <div class="legend-item"><div class="legend-chip chip-L">L</div><span>Libre</span></div>
+                    <div class="legend-item"><div class="legend-chip chip-V">V</div><span>Vacaciones</span></div>
+                    <div class="legend-item"><div class="legend-chip chip-B">B</div><span>Baja</span></div>
+                    <div class="legend-item"><div class="legend-chip chip-TC">🔒</div><span>Tarde cerrada</span></div>
+                    <span style="color:var(--text-muted); font-size:0.75rem;">| Clic en celda: cicla M→T→L | Clic en día: cerrar/abrir tarde</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- GRID -->
+        <div class="card">
+            <div id="gridContainer" class="schedule-wrapper">
+                <p style="color:var(--text-muted); padding:2rem; text-align:center;">Selecciona una tienda para ver el cuadro.</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/api.js"></script>
+    <script src="js/branding.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <script>
+        if (!isAuthenticated()) window.location.href = 'index.html';
+
+        // ── Estado ────────────────────────────────────────────────────
+        let currentYear  = new Date().getFullYear();
+        let currentMonth = new Date().getMonth(); // 0-based
+        let currentStore = '';
+        let scheduleId   = null;       // null = no guardada todavía
+        let employees    = [];         // empleados activos de la tienda
+        // assignments: { empId: { day: slot } }  (slot puede ser M/T/L/V/B)
+        let assignments  = {};
+        // closedAfternoons: Set<number>
+        let closedAfternoons = new Set();
+
+        const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                             'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        const DOW_LETTERS = ['D','L','M','X','J','V','S'];
+
+        // ── Init ──────────────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', async () => {
+            updateMonthLabel();
+            await loadStores();
+        });
+
+        function updateMonthLabel() {
+            document.getElementById('monthLabel').textContent =
+                `${MONTH_NAMES[currentMonth]} ${currentYear}`;
+        }
+
+        async function loadStores() {
+            const stores = await callAPI(`${API_URL}/shifts/stores`);
+            const sel = document.getElementById('storeSelect');
+            if (Array.isArray(stores) && stores.length > 0) {
+                stores.forEach(s => {
+                    const o = document.createElement('option');
+                    o.value = s; o.textContent = s;
+                    sel.appendChild(o);
+                });
+                // Auto-select if only one store
+                if (stores.length === 1) {
+                    sel.value = stores[0];
+                    onStoreChange();
+                }
+            }
+        }
+
+        async function onStoreChange() {
+            currentStore = document.getElementById('storeSelect').value;
+            if (!currentStore) {
+                document.getElementById('gridContainer').innerHTML =
+                    '<p style="color:var(--text-muted); padding:2rem; text-align:center;">Selecciona una tienda para ver el cuadro.</p>';
+                return;
+            }
+            await loadGrid();
+        }
+
+        function prevMonth() {
+            if (currentMonth === 0) { currentMonth = 11; currentYear--; }
+            else currentMonth--;
+            updateMonthLabel();
+            if (currentStore) loadGrid();
+        }
+
+        function nextMonth() {
+            if (currentMonth === 11) { currentMonth = 0; currentYear++; }
+            else currentMonth++;
+            updateMonthLabel();
+            if (currentStore) loadGrid();
+        }
+
+        // ── Carga la cuadrícula ───────────────────────────────────────
+        async function loadGrid() {
+            document.getElementById('gridContainer').innerHTML =
+                '<p style="color:var(--text-muted); padding:2rem; text-align:center;">Cargando...</p>';
+
+            // Cargar empleados de la tienda
+            const empResult = await employeesAPI.getAll({ status: 'active', location: currentStore, limit: 500 });
+            if (!empResult) return;
+            employees = empResult.employees || [];
+
+            // Cargar cuadrícula
+            const schedule = await schedulesAPI.get({ store_name: currentStore, month: currentMonth, year: currentYear });
+
+            assignments = {};
+            closedAfternoons = new Set();
+            scheduleId = null;
+
+            if (schedule) {
+                scheduleId = schedule._id;
+                document.getElementById('minMorning').value  = schedule.min_morning  ?? 5;
+                document.getElementById('minAfternoon').value = schedule.min_afternoon ?? 3;
+                closedAfternoons = new Set(schedule.closed_afternoons || []);
+                for (const a of (schedule.assignments || [])) {
+                    const eid = String(a.employee_id);
+                    if (!assignments[eid]) assignments[eid] = {};
+                    assignments[eid][a.day] = a.slot;
+                }
+                document.getElementById('btnDelete').hidden = false;
+            } else {
+                document.getElementById('btnDelete').hidden = true;
+                // Inicializar todos en L
+                const total = daysInMonth(currentYear, currentMonth);
+                for (const emp of employees) {
+                    const eid = String(emp._id);
+                    assignments[eid] = {};
+                    for (let d = 1; d <= total; d++) assignments[eid][d] = 'L';
+                }
+            }
+
+            renderGrid();
+        }
+
+        // ── Renderiza la tabla ────────────────────────────────────────
+        function renderGrid() {
+            const total = daysInMonth(currentYear, currentMonth);
+            const minM = parseInt(document.getElementById('minMorning').value, 10) || 5;
+            const minT = parseInt(document.getElementById('minAfternoon').value, 10) || 3;
+
+            // Separar empleados en mañana / tarde / sin turno
+            // Usamos el primer slot del día 1 que sea M o T como referencia de grupo
+            // Si no hay asignaciones todavía, usamos el turno del empleado (no disponible aquí fácilmente)
+            // Usamos slot del día laborable más cercano
+            function getBaseGroup(emp) {
+                const eid = String(emp._id);
+                const empAssign = assignments[eid] || {};
+                for (let d = 1; d <= total; d++) {
+                    const s = empAssign[d];
+                    if (s === 'M') return 'M';
+                    if (s === 'T') return 'T';
+                }
+                return 'L';
+            }
+
+            const morningEmps   = employees.filter(e => getBaseGroup(e) === 'M');
+            const afternoonEmps = employees.filter(e => getBaseGroup(e) === 'T');
+            const otherEmps     = employees.filter(e => getBaseGroup(e) === 'L');
+
+            // Calcular cobertura
+            const coverage = {}; // day -> { morning, afternoon }
+            for (let d = 1; d <= total; d++) coverage[d] = { morning: 0, afternoon: 0 };
+            for (const emp of employees) {
+                const eid = String(emp._id);
+                const empAssign = assignments[eid] || {};
+                for (let d = 1; d <= total; d++) {
+                    const s = empAssign[d];
+                    if (s === 'M') coverage[d].morning++;
+                    else if (s === 'T' && !closedAfternoons.has(d)) coverage[d].afternoon++;
+                }
+            }
+
+            // Build HTML
+            let html = `<table class="schedule-table" id="scheduleTable">`;
+
+            // Header row
+            html += `<thead><tr>`;
+            html += `<th class="col-name" style="position:sticky;left:0;z-index:3;background:#f9fafb;">Empleado</th>`;
+            for (let d = 1; d <= total; d++) {
+                const dow = new Date(Date.UTC(currentYear, currentMonth, d)).getUTCDay();
+                const isSun = dow === 0;
+                const isSat = dow === 6;
+                const isClosed = closedAfternoons.has(d);
+                const cls = isSun ? 'sunday' : (isSat ? 'saturday' : '') + (isClosed ? ' closed-col' : '');
+                html += `<th class="day-header ${cls}" onclick="toggleClosedAfternoon(${d})">
+                    <div class="day-header-inner">
+                        <span class="day-num">${d}</span>
+                        <span class="day-dow">${DOW_LETTERS[dow]}</span>
+                        ${isClosed ? '<span class="lock-icon">🔒</span>' : ''}
+                    </div>
+                </th>`;
+            }
+            html += `</tr></thead>`;
+
+            html += `<tbody>`;
+
+            function renderEmployeeRows(empList, label) {
+                if (empList.length === 0) return '';
+                let rows = `<tr class="group-label-row"><td colspan="${total + 1}">${label}</td></tr>`;
+                for (const emp of empList) {
+                    const eid = String(emp._id);
+                    const empAssign = assignments[eid] || {};
+                    rows += `<tr>`;
+                    rows += `<td class="col-name" title="${emp.position || ''}">${emp.full_name}</td>`;
+                    for (let d = 1; d <= total; d++) {
+                        const slot = empAssign[d] || 'L';
+                        const isReadOnly = slot === 'V' || slot === 'B';
+                        // Si tarde cerrada y slot T → mostrar TC
+                        const displaySlot = (!isReadOnly && slot === 'T' && closedAfternoons.has(d)) ? 'TC' : slot;
+                        const clickHandler = isReadOnly ? '' : `onclick="cycleSlot('${eid}',${d})"`;
+                        rows += `<td class="slot-cell slot-${displaySlot}" ${clickHandler} data-emp="${eid}" data-day="${d}">${displaySlot === 'TC' ? '🔒' : displaySlot}</td>`;
+                    }
+                    rows += `</tr>`;
+                }
+                return rows;
+            }
+
+            html += renderEmployeeRows(morningEmps,   '☀️ Turno Mañana');
+            html += renderEmployeeRows(afternoonEmps, '🌙 Turno Tarde');
+            html += renderEmployeeRows(otherEmps,     '— Sin asignación base');
+
+            // Coverage rows
+            html += `<tr class="coverage-row">`;
+            html += `<td class="col-name">Mañana cub.</td>`;
+            for (let d = 1; d <= total; d++) {
+                const cnt = coverage[d].morning;
+                let cls = 'cov-ok';
+                if (cnt < minM) cls = (minM - cnt >= 2) ? 'cov-bad' : 'cov-warn';
+                html += `<td class="${cls}">${cnt}</td>`;
+            }
+            html += `</tr>`;
+
+            html += `<tr class="coverage-row">`;
+            html += `<td class="col-name">Tarde cub.</td>`;
+            for (let d = 1; d <= total; d++) {
+                const isClosed = closedAfternoons.has(d);
+                if (isClosed) {
+                    html += `<td class="cov-closed">🔒</td>`;
+                } else {
+                    const cnt = coverage[d].afternoon;
+                    let cls = 'cov-ok';
+                    if (cnt < minT) cls = (minT - cnt >= 2) ? 'cov-bad' : 'cov-warn';
+                    html += `<td class="${cls}">${cnt}</td>`;
+                }
+            }
+            html += `</tr>`;
+
+            html += `</tbody></table>`;
+
+            document.getElementById('gridContainer').innerHTML = html;
+        }
+
+        // ── Interacción de celdas ─────────────────────────────────────
+        function cycleSlot(empId, day) {
+            if (!assignments[empId]) assignments[empId] = {};
+            const cur = assignments[empId][day] || 'L';
+            if (cur === 'V' || cur === 'B') return; // read-only
+            const cycle = { 'M': 'T', 'T': 'L', 'L': 'M' };
+            assignments[empId][day] = cycle[cur] || 'M';
+            renderGrid();
+        }
+
+        function toggleClosedAfternoon(day) {
+            if (closedAfternoons.has(day)) closedAfternoons.delete(day);
+            else closedAfternoons.add(day);
+            renderGrid();
+        }
+
+        // ── Guardar ───────────────────────────────────────────────────
+        async function saveSchedule() {
+            if (!currentStore) return showAlert('Selecciona una tienda primero', 'warning');
+
+            const minMorning   = parseInt(document.getElementById('minMorning').value, 10) || 5;
+            const minAfternoon = parseInt(document.getElementById('minAfternoon').value, 10) || 3;
+
+            // Construir array de assignments para la API
+            const assignArr = [];
+            for (const [empId, days] of Object.entries(assignments)) {
+                for (const [dayStr, slot] of Object.entries(days)) {
+                    if (slot !== 'V' && slot !== 'B') { // no guardamos los derivados de vacaciones/bajas
+                        assignArr.push({ employee_id: empId, day: parseInt(dayStr, 10), slot });
+                    }
+                }
+            }
+
+            const payload = {
+                store_name: currentStore,
+                year:  currentYear,
+                month: currentMonth,
+                min_morning:  minMorning,
+                min_afternoon: minAfternoon,
+                assignments: assignArr,
+                closed_afternoons: [...closedAfternoons]
+            };
+
+            let result;
+            if (scheduleId) {
+                result = await schedulesAPI.update(scheduleId, payload);
+            } else {
+                result = await schedulesAPI.create(payload);
+            }
+
+            if (result) {
+                showAlert('Cuadrícula guardada correctamente', 'success');
+                if (!scheduleId && result.schedule) {
+                    scheduleId = result.schedule._id;
+                    document.getElementById('btnDelete').hidden = false;
+                }
+            }
+        }
+
+        // ── Auto-generar ──────────────────────────────────────────────
+        async function autoGenerate() {
+            if (!currentStore) return showAlert('Selecciona una tienda primero', 'warning');
+            if (!confirm('¿Auto-generar asignaciones desde los turnos de empleados? Las asignaciones manuales se perderán.')) return;
+
+            // Guarda primero si no existe el schedule
+            if (!scheduleId) {
+                const minMorning   = parseInt(document.getElementById('minMorning').value, 10) || 5;
+                const minAfternoon = parseInt(document.getElementById('minAfternoon').value, 10) || 3;
+                const created = await schedulesAPI.create({
+                    store_name: currentStore,
+                    year: currentYear,
+                    month: currentMonth,
+                    min_morning:  minMorning,
+                    min_afternoon: minAfternoon,
+                    assignments: [],
+                    closed_afternoons: [...closedAfternoons]
+                });
+                if (!created || !created.schedule) return showAlert('Error al crear la cuadrícula base', 'error');
+                scheduleId = created.schedule._id;
+                document.getElementById('btnDelete').hidden = false;
+            }
+
+            const result = await schedulesAPI.autoGenerate(scheduleId);
+            if (!result) return;
+
+            assignments = {};
+            for (const a of (result.assignments || [])) {
+                const eid = String(a.employee_id);
+                if (!assignments[eid]) assignments[eid] = {};
+                assignments[eid][a.day] = a.slot;
+            }
+            showAlert('Cuadrícula auto-generada. Revisa y guarda los cambios.', 'success');
+            renderGrid();
+        }
+
+        // ── Eliminar ──────────────────────────────────────────────────
+        async function deleteSchedule() {
+            if (!scheduleId) return;
+            if (!confirm('¿Eliminar la cuadrícula de este mes? Esta acción no se puede deshacer.')) return;
+            const result = await schedulesAPI.delete(scheduleId);
+            if (result) {
+                showAlert('Cuadrícula eliminada', 'success');
+                scheduleId = null;
+                assignments = {};
+                closedAfternoons = new Set();
+                document.getElementById('btnDelete').hidden = true;
+                renderGrid();
+            }
+        }
+
+        // ── Exportar PDF ──────────────────────────────────────────────
+        async function exportPDF() {
+            if (!currentStore) return showAlert('Selecciona una tienda primero', 'warning');
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+            const total = daysInMonth(currentYear, currentMonth);
+            const minM  = parseInt(document.getElementById('minMorning').value, 10) || 5;
+            const minT  = parseInt(document.getElementById('minAfternoon').value, 10) || 3;
+
+            doc.setFontSize(14);
+            doc.text(`Cuadro de Turnos - ${currentStore} - ${MONTH_NAMES[currentMonth]} ${currentYear}`, 10, 12);
+            doc.setFontSize(8);
+            doc.text(`Min mañana: ${minM}  |  Min tarde: ${minT}`, 10, 18);
+
+            const head = [['Empleado', ...Array.from({ length: total }, (_, i) => {
+                const d = i + 1;
+                const dow = new Date(Date.UTC(currentYear, currentMonth, d)).getUTCDay();
+                return `${d}\n${DOW_LETTERS[dow]}`;
+            })]];
+
+            const bodyRows = [];
+            for (const emp of employees) {
+                const eid = String(emp._id);
+                const empAssign = assignments[eid] || {};
+                bodyRows.push([emp.full_name, ...Array.from({ length: total }, (_, i) => {
+                    const s = empAssign[i + 1] || 'L';
+                    return s;
+                })]);
+            }
+
+            // Coverage rows
+            const covM = ['Mañana'];
+            const covT = ['Tarde'];
+            for (let d = 1; d <= total; d++) {
+                let m = 0, t = 0;
+                for (const emp of employees) {
+                    const s = (assignments[String(emp._id)] || {})[d] || 'L';
+                    if (s === 'M') m++;
+                    if (s === 'T' && !closedAfternoons.has(d)) t++;
+                }
+                covM.push(String(m));
+                covT.push(closedAfternoons.has(d) ? '🔒' : String(t));
+            }
+            bodyRows.push(covM);
+            bodyRows.push(covT);
+
+            doc.autoTable({
+                head,
+                body: bodyRows,
+                startY: 22,
+                styles: { fontSize: 6, cellPadding: 1, halign: 'center' },
+                columnStyles: { 0: { halign: 'left', cellWidth: 28 } },
+                headStyles: { fillColor: [79, 70, 229], textColor: 255, fontSize: 6 },
+                didParseCell: (data) => {
+                    if (data.section === 'body' && data.column.index > 0) {
+                        const v = data.cell.raw;
+                        if (v === 'M') { data.cell.styles.fillColor = [79, 70, 229]; data.cell.styles.textColor = 255; }
+                        else if (v === 'T') { data.cell.styles.fillColor = [234, 88, 12]; data.cell.styles.textColor = 255; }
+                        else if (v === 'V') { data.cell.styles.fillColor = [124, 58, 237]; data.cell.styles.textColor = 255; }
+                        else if (v === 'B') { data.cell.styles.fillColor = [220, 38, 38]; data.cell.styles.textColor = 255; }
+                    }
+                }
+            });
+
+            doc.save(`Turnos_${currentStore}_${MONTH_NAMES[currentMonth]}_${currentYear}.pdf`);
+        }
+
+        // ── Utilidades ────────────────────────────────────────────────
+        function daysInMonth(year, month) {
+            return new Date(year, month + 1, 0).getDate();
+        }
+    </script>
+</body>
+</html>

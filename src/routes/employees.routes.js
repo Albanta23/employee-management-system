@@ -500,7 +500,7 @@ router.put('/:id', async (req, res) => {
         const inScope = await ensureEmployeeInScope(req, res, req.params.id);
         if (!inScope) return;
 
-        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, vacation_carryover_days, enableAccess, username, password } = req.body;
+        const { full_name, dni, phone, email, position, location, salary, status, notes, convention, hire_date, annual_vacation_days, vacation_carryover_days, enableAccess, username, password, can_rotate, secondary_shift_id } = req.body;
 
         function parseOptionalNumberOrNull(value, fieldName) {
             if (value === undefined) return { hasValue: false };
@@ -582,6 +582,11 @@ router.put('/:id', async (req, res) => {
                 }
                 update.vacation_carryover_days = n;
             }
+        }
+
+        if (can_rotate !== undefined) update.can_rotate = !!can_rotate;
+        if (secondary_shift_id !== undefined) {
+            update.secondary_shift_id = secondary_shift_id || null;
         }
 
         const employee = await Employee.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true, context: 'query' }).lean();

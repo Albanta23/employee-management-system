@@ -179,6 +179,10 @@
                 <span class="info-label">Ubicación</span>
                 <span class="info-value" id="display-location">...</span>
             </div>
+            <div class="info-row">
+                <span class="info-label">Turno asignado</span>
+                <span class="info-value" id="display-shift" style="color:var(--text-muted);">Sin turno asignado</span>
+            </div>
         </div>
 
         <h3 style="font-size: 1.1rem; margin: 1.75rem 0 1rem; color: var(--primary-light);">Mi horario</h3>
@@ -307,6 +311,21 @@
                 document.getElementById('display-position').textContent = employeeData.position || 'Empleado';
                 document.getElementById('display-dni').textContent = employeeData.dni;
                 document.getElementById('display-location').textContent = employeeData.location || '-';
+
+                // Cargar turno asignado
+                const shiftEl = document.getElementById('display-shift');
+                if (employeeData.shift_id) {
+                    try {
+                        const shiftRes = await fetch(`${API_URL}/shifts/${employeeData.shift_id}`, { headers: getAuthHeaders() });
+                        if (shiftRes.ok) {
+                            const shift = await shiftRes.json();
+                            shiftEl.innerHTML = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${shift.color || '#6366f1'}; margin-right:6px; vertical-align:middle;"></span>${shift.name} (${shift.weekdayStart}–${shift.weekdayEnd})`;
+                            shiftEl.style.color = '';
+                        }
+                    } catch(e) { /* turno no disponible */ }
+                } else {
+                    shiftEl.textContent = 'Sin turno asignado';
+                }
 
                 document.getElementById('email').value = employeeData.email || '';
                 document.getElementById('phone').value = employeeData.phone || '';

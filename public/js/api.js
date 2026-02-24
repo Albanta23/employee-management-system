@@ -303,6 +303,28 @@ const settingsAPI = {
     })
 };
 
+// Cuadrícula mensual de turnos
+const schedulesAPI = {
+    get: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return callAPI(`${API_URL}/schedules?${query}`);
+    },
+    create: (data) => callAPI(`${API_URL}/schedules`, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    }),
+    update: (id, data) => callAPI(`${API_URL}/schedules/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    }),
+    autoGenerate: (id) => callAPI(`${API_URL}/schedules/${id}/auto-generate`, {
+        method: 'POST',
+        body: JSON.stringify({})
+    }),
+    delete: (id) => callAPI(`${API_URL}/schedules/${id}`, { method: 'DELETE' }),
+    getForEmployee: (employeeId) => callAPI(`${API_URL}/schedules/employee/${employeeId}`)
+};
+
 // Guard + menú para rol store_coordinator
 (function enforceStoreCoordinatorUI() {
     async function run() {
